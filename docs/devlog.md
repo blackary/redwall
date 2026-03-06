@@ -53,3 +53,9 @@
 - Tests run: `npm test`; `npm run test:e2e -- tests/e2e/bootstrap.spec.ts tests/e2e/economy-resume.spec.ts tests/e2e/skirmish-ai.spec.ts tests/e2e/settings.spec.ts tests/e2e/production-progress.spec.ts tests/e2e/match-flow.spec.ts`; `npm run build`
 - Known gaps: The remote per-push deploy run still needs to be re-checked after this follow-up commit lands.
 - Commit hash: `bcecc2b`
+
+## 2026-03-06 AoE Shell Pass
+- Summary: Reworked the in-match presentation into an over-canvas RTS shell with a top resource ribbon and bottom command dock, added hotkeyed command cards with cost/readiness states, richer selection and queue readouts, minimap camera navigation, same-type group selection hooks, and AoE-style Playwright coverage for the new shell behaviors.
+- Tests run: `npm test`; `npm run test:e2e`; `npm run build`
+- Known gaps: The game now reads much more like a classic RTS shell, but unit picking still needs a future dedicated pass for more precise sprite-level hit behavior without leaning on deterministic debug helpers in tests.
+- Commit hash: `c55d4ac`
