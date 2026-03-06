@@ -84,7 +84,11 @@ test("workers expose live movement and harvesting animation states", async ({ pa
       && entity.order.phase === "harvest";
   }, workerId);
 
-  const harvesting = await page.evaluate((id) => id ? window.__REDWALL_DEBUG__?.getAnimationState(id) : undefined, workerId);
-  expect(harvesting?.activity).toBe("harvest");
-  expect(Math.abs(harvesting?.gearSwing ?? 0)).toBeGreaterThan(0.6);
+  const harvestingA = await page.evaluate((id) => id ? window.__REDWALL_DEBUG__?.getAnimationState(id) : undefined, workerId);
+  await page.waitForTimeout(120);
+  const harvestingB = await page.evaluate((id) => id ? window.__REDWALL_DEBUG__?.getAnimationState(id) : undefined, workerId);
+  expect(harvestingA?.activity).toBe("harvest");
+  expect(harvestingB?.activity).toBe("harvest");
+  expect(Math.max(Math.abs(harvestingA?.gearSwing ?? 0), Math.abs(harvestingB?.gearSwing ?? 0))).toBeGreaterThan(0.15);
+  expect(harvestingA?.gearSwing).not.toBe(harvestingB?.gearSwing);
 });

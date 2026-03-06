@@ -73,6 +73,7 @@ test("economy loop progresses and latest skirmish resumes after reload", async (
   const population = await page.getByTestId("population-value").textContent();
   expect(population).not.toBeNull();
 
+  await page.evaluate(() => window.__REDWALL_DEBUG__?.setPaused(true));
   const saved = await page.evaluate(() => window.__REDWALL_DEBUG__?.saveNow());
   expect(saved).toBe(true);
 

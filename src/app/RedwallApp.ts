@@ -43,6 +43,7 @@ type DebugApi = {
   clearSave: () => Promise<void>;
   hasResume: () => boolean;
   getSettings: () => GameSettings;
+  setPaused: (paused: boolean) => void;
   forceOutcome: (outcome: Outcome) => void;
   getScreenPointForEntity: (id: string) => TilePoint | undefined;
   getScreenPointForTile: (tile: TilePoint) => TilePoint | undefined;
@@ -126,6 +127,9 @@ export class RedwallApp {
       },
       hasResume: () => Boolean(this.resumeMeta),
       getSettings: () => ({ ...this.settings }),
+      setPaused: (paused: boolean) => {
+        this.session?.setPaused(paused);
+      },
       forceOutcome: (outcome: Outcome) => {
         this.session?.forceOutcome(outcome);
       },

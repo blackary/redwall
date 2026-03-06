@@ -89,3 +89,9 @@
 - Tests run: `npm test`; `npm run test:e2e`; `npm run build`
 - Known gaps: The game now supports multiple maps, factions, and a progression loop, but it still needs more playable factions, tutorial chapters, mission-style content, and deeper faction-specific art/audio to complete the full expansion plan.
 - Commit hash: `50a0af5`
+
+## 2026-03-06 CI Resume and Animation Stabilization
+- Summary: Added a pause hook to the debug surface so save/resume assertions can freeze the sim at the saved frame, and tightened the animation-state Playwright test to verify harvesting motion over time instead of relying on a single peak-swing sample that could miss on slower CI runners.
+- Tests run: `npm test`; `npm run test:e2e`; `npm run build`
+- Known gaps: CI is stabilized for the current suite, but future test additions should keep preferring deterministic state transitions over timing-sensitive frame sampling where possible.
+- Commit hash: `TBD`
