@@ -5,7 +5,7 @@ import { Hud } from "../ui/Hud";
 import { stringToSeed } from "../core/random";
 import { createSnapshot } from "../core/save";
 import type { BuildingType, Difficulty, GameCommand, GameConfig, TilePoint, WorldState } from "../core/types";
-import { BrowserStorage, type ResumeMetadata } from "../persistence/storage";
+import { BrowserStorage, type GameSettings, type ResumeMetadata } from "../persistence/storage";
 
 type AppMode = "menu" | "skirmish";
 
@@ -22,6 +22,7 @@ type DebugApi = {
   saveNow: () => Promise<boolean>;
   clearSave: () => Promise<void>;
   hasResume: () => boolean;
+  getSettings: () => GameSettings;
   getScreenPointForEntity: (id: string) => TilePoint | undefined;
   getScreenPointForTile: (tile: TilePoint) => TilePoint | undefined;
   getCameraState: () => { scrollX: number; scrollY: number; zoom: number } | undefined;
@@ -40,13 +41,16 @@ export class RedwallApp {
   private phaserGame?: Phaser.Game;
   private scene?: RedwallScene;
   private session?: GameSession;
+  private hud?: Hud;
   private readonly storage = new BrowserStorage();
+  private settings: GameSettings;
   private resumeMeta?: ResumeMetadata;
   private autosaveTimer = 0;
 
   public constructor(root: HTMLDivElement, search: string) {
     this.root = root;
     this.params = new URLSearchParams(search);
+    this.settings = this.storage.loadSettings();
     window.__REDWALL_DEBUG__ = {
       getMode: () => this.mode,
       startSkirmish: async () => {
@@ -72,6 +76,7 @@ export class RedwallApp {
         this.renderMenu();
       },
       hasResume: () => Boolean(this.resumeMeta),
+      getSettings: () => ({ ...this.settings }),
       getScreenPointForEntity: (id: string) => this.scene?.getScreenPointForEntity(id),
       getScreenPointForTile: (tile: TilePoint) => this.scene?.getScreenPointForTile(tile),
       getCameraState: () => this.scene?.getCameraState(),
@@ -80,6 +85,7 @@ export class RedwallApp {
 
   public start(): void {
     this.resumeMeta = this.storage.getResumeMetadata();
+    this.settings = this.storage.loadSettings();
     this.renderMenu();
   }
 
@@ -114,8 +120,38 @@ export class RedwallApp {
             <section class="status-card">
               <div class="status-row"><span>Mode</span><strong data-testid="app-mode">${this.mode}</strong></div>
               <div class="status-row"><span>E2E</span><strong data-testid="e2e-mode">${this.params.get("e2e") === "1" ? "enabled" : "disabled"}</strong></div>
-              <div class="status-row"><span>Build</span><strong>Stage 2</strong></div>
-              <div class="status-row"><span>Controls</span><strong>WASD + click</strong></div>
+              <div class="status-row"><span>Build</span><strong>Vertical Slice</strong></div>
+              <div class="status-row"><span>Controls</span><strong>Context + command modes</strong></div>
+              <div class="settings-group" data-testid="settings-panel">
+                <label class="setting-row" for="show-grid-toggle">
+                  <span>
+                    <strong>Show Grid</strong>
+                    <small>Sharper battlefield tile outlines for precise placement.</small>
+                  </span>
+                  <input
+                    id="show-grid-toggle"
+                    data-testid="show-grid-toggle"
+                    type="checkbox"
+                    ${this.settings.showGrid ? "checked" : ""}
+                  />
+                </label>
+                <label class="setting-row" for="reduced-motion-toggle">
+                  <span>
+                    <strong>Reduce Motion</strong>
+                    <small>Softens battlefield ping animation and camera feedback.</small>
+                  </span>
+                  <input
+                    id="reduced-motion-toggle"
+                    data-testid="reduced-motion-toggle"
+                    type="checkbox"
+                    ${this.settings.reducedMotion ? "checked" : ""}
+                  />
+                </label>
+              </div>
+              <div class="control-copy">
+                <p class="small-copy">Mac-friendly commands: use right click, <code>Ctrl</code>+click, or <code>Alt</code>+left-click.</p>
+                <p class="small-copy">If contextual commands feel off, arm <code>Move</code>, <code>Gather</code>, <code>Attack</code>, or <code>Rally</code> from the HUD and place them with left click.</p>
+              </div>
             </section>
           </main>
         </div>
@@ -127,9 +163,23 @@ export class RedwallApp {
     this.root.querySelector<HTMLButtonElement>("[data-testid='continue-skirmish']")?.addEventListener("click", () => {
       void this.continueLastMatch();
     });
+    this.root.querySelector<HTMLInputElement>("[data-testid='show-grid-toggle']")?.addEventListener("change", (event) => {
+      const input = event.currentTarget as HTMLInputElement;
+      this.updateSettings({
+        ...this.settings,
+        showGrid: input.checked,
+      });
+    });
+    this.root.querySelector<HTMLInputElement>("[data-testid='reduced-motion-toggle']")?.addEventListener("change", (event) => {
+      const input = event.currentTarget as HTMLInputElement;
+      this.updateSettings({
+        ...this.settings,
+        reducedMotion: input.checked,
+      });
+    });
   }
 
-  private async startSkirmish(existingWorld?: WorldState): Promise<void> {
+  private async startSkirmish(existingWorld?: WorldState, resumeMeta?: ResumeMetadata): Promise<void> {
     this.destroyGame();
     this.mode = "skirmish";
     this.root.innerHTML = `
@@ -146,9 +196,9 @@ export class RedwallApp {
       throw new Error("Game shell failed to mount");
     }
 
-    const config = this.buildConfig();
+    const config = this.buildConfig(resumeMeta);
     this.session = new GameSession(config, existingWorld);
-    this.scene = new RedwallScene(this.session);
+    this.scene = new RedwallScene(this.session, this.settings);
     this.phaserGame = new Phaser.Game({
       type: Phaser.AUTO,
       width: 1280,
@@ -161,7 +211,11 @@ export class RedwallApp {
         autoCenter: Phaser.Scale.CENTER_BOTH,
       },
     });
-    new Hud(this.session, hudHost);
+    this.hud = new Hud(this.session, hudHost, {
+      settings: this.settings,
+      onSaveAndExit: async () => this.saveAndExitToMenu(),
+      onSettingsChange: (settings) => this.updateSettings(settings),
+    });
     this.autosaveTimer = this.session.getElapsedMs();
     this.session.subscribe(() => {
       void this.handleAutosave();
@@ -176,13 +230,20 @@ export class RedwallApp {
       this.renderMenu();
       return false;
     }
-    await this.startSkirmish(snapshot.world);
+    const resumeMeta = {
+      timestamp: snapshot.timestamp,
+      difficulty: snapshot.difficulty,
+      seed: snapshot.seed,
+      elapsedMs: snapshot.elapsedMs,
+    };
+    this.resumeMeta = resumeMeta;
+    await this.startSkirmish(snapshot.world, resumeMeta);
     return true;
   }
 
-  private buildConfig(): GameConfig {
-    const seedParam = this.resumeMeta?.seed?.toString() ?? this.params.get("seed") ?? "mossflower";
-    const difficulty = this.resumeMeta?.difficulty ?? (this.params.get("difficulty") as Difficulty | null) ?? "normal";
+  private buildConfig(resumeMeta?: ResumeMetadata): GameConfig {
+    const seedParam = resumeMeta?.seed?.toString() ?? this.params.get("seed") ?? "mossflower";
+    const difficulty = resumeMeta?.difficulty ?? (this.params.get("difficulty") as Difficulty | null) ?? "normal";
     return {
       seed: /^\d+$/.test(seedParam) ? Number(seedParam) : stringToSeed(seedParam),
       mapPreset: "mossflowerMeadows",
@@ -192,6 +253,8 @@ export class RedwallApp {
   }
 
   private destroyGame(): void {
+    this.hud?.destroy();
+    this.hud = undefined;
     this.session?.destroy();
     this.session = undefined;
     if (this.phaserGame) {
@@ -229,5 +292,29 @@ export class RedwallApp {
     this.autosaveTimer = snapshot.elapsedMs;
     this.resumeMeta = this.storage.getResumeMetadata();
     return true;
+  }
+
+  private updateSettings(settings: GameSettings): void {
+    this.settings = settings;
+    this.storage.saveSettings(settings);
+    this.scene?.applySettings(settings);
+    this.hud?.updateSettings(settings);
+    if (this.mode === "menu") {
+      this.renderMenu();
+    }
+  }
+
+  private async saveAndExitToMenu(): Promise<boolean> {
+    const saved = this.session?.getWorld().outcome === "ongoing"
+      ? await this.saveCurrentSession()
+      : false;
+    if (!saved && this.session?.getWorld().outcome !== "ongoing") {
+      await this.storage.clearSnapshot();
+    }
+    this.destroyGame();
+    this.mode = "menu";
+    this.resumeMeta = this.storage.getResumeMetadata();
+    this.renderMenu();
+    return saved;
   }
 }

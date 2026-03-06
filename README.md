@@ -28,6 +28,9 @@ Browser-only real-time strategy prototype inspired by Age of Empires, reframed a
 - `Q`: train worker from `Abbey Hall`
 - `R`: train archer from `Range`
 - `Escape`: clear armed build/command modes
+- `Grid` toggle in HUD: sharpen tile outlines for precise placement
+- `Motion` toggle in HUD: reduce animated command pings
+- `Save & Exit`: save the current skirmish and return to the menu with `Continue Last Match` ready
 
 ## Local development
 ```bash
@@ -51,4 +54,4 @@ The Playwright suite covers:
 - AI skirmish expansion/pressure
 
 ## GitHub Pages
-The Pages workflow in [.github/workflows/deploy-pages.yml](/Users/zachary/projects/redwall/.github/workflows/deploy-pages.yml) builds the app with `npm run build` and deploys the `dist/` output. Because Vite is configured with `base: "./"`, the generated `index.html` and asset paths are GitHub Pages compatible without router rewrites.
+The Pages workflow in [.github/workflows/deploy-pages.yml](/Users/zachary/projects/redwall/.github/workflows/deploy-pages.yml) installs dependencies, runs `npm test`, runs `npm run test:e2e`, builds the app with `npm run build`, and deploys the `dist/` output. Because Vite is configured with `base: "./"`, the generated `index.html` and asset paths are GitHub Pages compatible without router rewrites.

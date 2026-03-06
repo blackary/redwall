@@ -152,6 +152,42 @@ select {
   border-bottom: 0;
 }
 
+.settings-group {
+  display: grid;
+  gap: 12px;
+  padding: 8px 0;
+}
+
+.setting-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 16px;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.setting-row span {
+  display: grid;
+  gap: 4px;
+}
+
+.setting-row small {
+  color: #c4b79c;
+}
+
+.setting-row input {
+  width: 18px;
+  height: 18px;
+  accent-color: #d9ba73;
+}
+
+.control-copy {
+  display: grid;
+  gap: 8px;
+}
+
 .canvas-host {
   border-radius: 28px;
   border: 1px solid rgba(232, 215, 173, 0.18);
@@ -216,6 +252,13 @@ select {
 .resource-strip span,
 .meta-strip span {
   color: #d7ceb7;
+}
+
+.meta-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 10px;
 }
 
 .secondary-button,
@@ -314,5 +357,10 @@ select {
 
   .canvas-host {
     min-height: 480px;
+  }
+
+  .setting-row,
+  .meta-actions {
+    justify-content: space-between;
   }
 }

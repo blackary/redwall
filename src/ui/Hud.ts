@@ -2,6 +2,7 @@ import { GameSession } from "../app/GameSession";
 import { BUILDING_DEFINITIONS, RESEARCH_DEFINITIONS, UNIT_DEFINITIONS } from "../core/content";
 import { tileIndex } from "../core/map";
 import type { Age, BuildingEntity, BuildingType, Entity, ResearchId, UnitEntity, UnitType } from "../core/types";
+import type { GameSettings } from "../persistence/storage";
 
 function formatAge(age: Age): string {
   return age === "settlement" ? "Settlement Age" : age === "abbey" ? "Abbey Age" : "Warhost Age";
@@ -11,9 +12,16 @@ function formatLabel(identifier: string): string {
   return identifier.replace(/[A-Z]/g, (match) => ` ${match}`).replace(/^./, (char) => char.toUpperCase());
 }
 
+interface HudOptions {
+  settings: GameSettings;
+  onSaveAndExit: () => Promise<unknown> | void;
+  onSettingsChange: (settings: GameSettings) => void;
+}
+
 export class Hud {
   private readonly session: GameSession;
   private readonly root: HTMLDivElement;
+  private readonly options: HudOptions;
   private readonly minimapCanvas: HTMLCanvasElement;
   private readonly actionsHost: HTMLDivElement;
   private readonly selectionHost: HTMLDivElement;
@@ -22,10 +30,19 @@ export class Hud {
   private readonly ageLabel: HTMLSpanElement;
   private readonly commandLabel: HTMLSpanElement;
   private readonly outcomeLabel: HTMLParagraphElement;
+  private readonly pauseButton: HTMLButtonElement;
+  private readonly gridButton: HTMLButtonElement;
+  private readonly motionButton: HTMLButtonElement;
+  private readonly saveExitButton: HTMLButtonElement;
+  private readonly handleKeydownBound: (event: KeyboardEvent) => void;
+  private readonly unsubscribe: () => void;
+  private settings: GameSettings;
 
-  public constructor(session: GameSession, root: HTMLDivElement) {
+  public constructor(session: GameSession, root: HTMLDivElement, options: HudOptions) {
     this.session = session;
     this.root = root;
+    this.options = options;
+    this.settings = options.settings;
     this.root.className = "hud";
     this.root.innerHTML = `
       <section class="hud-bar" data-testid="hud">
@@ -39,7 +56,12 @@ export class Hud {
         <div class="meta-strip">
           <span data-testid="age-label">Settlement Age</span>
           <span data-testid="command-mode">Context</span>
-          <button class="secondary-button" data-testid="pause-button">Pause</button>
+          <div class="meta-actions">
+            <button class="secondary-button" data-testid="toggle-grid-button">Grid: Off</button>
+            <button class="secondary-button" data-testid="toggle-motion-button">Motion: Full</button>
+            <button class="secondary-button" data-testid="save-exit-button">Save & Exit</button>
+            <button class="secondary-button" data-testid="pause-button">Pause</button>
+          </div>
         </div>
       </section>
       <section class="hud-columns">
@@ -75,15 +97,44 @@ export class Hud {
       population: this.root.querySelector("[data-testid='population-value']") as HTMLSpanElement,
     };
 
-    const pauseButton = this.root.querySelector("[data-testid='pause-button']") as HTMLButtonElement;
-    pauseButton.addEventListener("click", () => {
+    this.pauseButton = this.root.querySelector("[data-testid='pause-button']") as HTMLButtonElement;
+    this.gridButton = this.root.querySelector("[data-testid='toggle-grid-button']") as HTMLButtonElement;
+    this.motionButton = this.root.querySelector("[data-testid='toggle-motion-button']") as HTMLButtonElement;
+    this.saveExitButton = this.root.querySelector("[data-testid='save-exit-button']") as HTMLButtonElement;
+
+    this.pauseButton.addEventListener("click", () => {
       const next = !this.session.getSessionState().paused;
       this.session.setPaused(next);
-      pauseButton.textContent = next ? "Resume" : "Pause";
+    });
+    this.gridButton.addEventListener("click", () => {
+      this.options.onSettingsChange({
+        ...this.settings,
+        showGrid: !this.settings.showGrid,
+      });
+    });
+    this.motionButton.addEventListener("click", () => {
+      this.options.onSettingsChange({
+        ...this.settings,
+        reducedMotion: !this.settings.reducedMotion,
+      });
+    });
+    this.saveExitButton.addEventListener("click", () => {
+      void this.options.onSaveAndExit();
     });
 
-    window.addEventListener("keydown", (event) => this.handleKeydown(event));
-    this.session.subscribe(() => this.render());
+    this.handleKeydownBound = (event: KeyboardEvent) => this.handleKeydown(event);
+    window.addEventListener("keydown", this.handleKeydownBound);
+    this.unsubscribe = this.session.subscribe(() => this.render());
+    this.render();
+  }
+
+  public destroy(): void {
+    window.removeEventListener("keydown", this.handleKeydownBound);
+    this.unsubscribe();
+  }
+
+  public updateSettings(settings: GameSettings): void {
+    this.settings = settings;
     this.render();
   }
 
@@ -108,6 +159,10 @@ export class Hud {
         : world.outcome === "playerDefeat"
           ? "The Abbey alliance has fallen."
           : "Hold the field. Destroy the enemy host.";
+    this.pauseButton.textContent = sessionState.paused ? "Resume" : "Pause";
+    this.gridButton.textContent = this.settings.showGrid ? "Grid: On" : "Grid: Off";
+    this.motionButton.textContent = this.settings.reducedMotion ? "Motion: Reduced" : "Motion: Full";
+    this.saveExitButton.textContent = world.outcome === "ongoing" ? "Save & Exit" : "Return to Menu";
 
     const selected = this.session.getSelectedEntities();
     this.selectionHost.innerHTML = "";
@@ -292,6 +347,14 @@ export class Hud {
   }
 
   private handleKeydown(event: KeyboardEvent): void {
+    if (event.repeat) {
+      return;
+    }
+    if (event.code === "Escape") {
+      this.session.setBuildMode(undefined);
+      this.session.setCommandMode(undefined);
+      return;
+    }
     const selected = this.session.getSelectedEntities();
     if (selected.length === 0) {
       return;
@@ -331,10 +394,6 @@ export class Hud {
         if (single?.kind === "building" && single.buildingType === "range") {
           this.session.issueCommand({ type: "train", buildingId: single.id, unitType: "archer" });
         }
-        break;
-      case "Escape":
-        this.session.setBuildMode(undefined);
-        this.session.setCommandMode(undefined);
         break;
       default:
         break;

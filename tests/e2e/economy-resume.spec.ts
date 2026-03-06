@@ -90,6 +90,7 @@ test("economy loop progresses and latest skirmish resumes after reload", async (
   await page.reload();
   await expect(page.getByTestId("continue-skirmish")).toBeEnabled();
   await page.getByTestId("continue-skirmish").click();
+  await expect(page.getByTestId("game-shell")).toBeVisible();
 
   const afterReload = await page.evaluate(() => {
     const snapshot = window.__REDWALL_DEBUG__?.getSnapshot();

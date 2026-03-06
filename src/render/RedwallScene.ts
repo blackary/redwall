@@ -3,6 +3,7 @@ import { BUILDING_DEFINITIONS, UNIT_DEFINITIONS } from "../core/content";
 import { tileIndex } from "../core/map";
 import type { BuildingEntity, BuildingType, Entity, TilePoint, UnitEntity, WorldState } from "../core/types";
 import { GameSession } from "../app/GameSession";
+import type { GameSettings } from "../persistence/storage";
 
 type Ping = { tile: TilePoint; ttlMs: number };
 
@@ -12,6 +13,7 @@ function clamp(value: number, minimum: number, maximum: number): number {
 
 export class RedwallScene extends Phaser.Scene {
   private readonly session: GameSession;
+  private settings: GameSettings;
   private readonly tileWidth = 88;
   private readonly tileHeight = 44;
   private readonly origin = { x: 600, y: 88 };
@@ -25,9 +27,14 @@ export class RedwallScene extends Phaser.Scene {
   private isPanning = false;
   private lastPanPoint?: { x: number; y: number };
 
-  public constructor(session: GameSession) {
+  public constructor(session: GameSession, settings: GameSettings) {
     super("battlefield");
     this.session = session;
+    this.settings = settings;
+  }
+
+  public applySettings(settings: GameSettings): void {
+    this.settings = settings;
   }
 
   public create(): void {
@@ -215,8 +222,9 @@ export class RedwallScene extends Phaser.Scene {
               : visible
                 ? 0x4e6f48
                 : 0x2d402b;
+        const lineAlpha = this.settings.showGrid ? 0.72 : 0.14;
         graphics.fillStyle(fillColor, 1);
-        graphics.lineStyle(1, visible ? 0x182220 : 0x0d1412, 0.65);
+        graphics.lineStyle(1, visible ? 0x182220 : 0x0d1412, lineAlpha);
         graphics.beginPath();
         graphics.moveTo(point.x, point.y);
         graphics.lineTo(point.x + this.tileWidth / 2, point.y + this.tileHeight / 2);
@@ -301,8 +309,9 @@ export class RedwallScene extends Phaser.Scene {
 
     for (const ping of this.pings) {
       const point = this.tileToScreen({ x: ping.tile.x + 0.5, y: ping.tile.y + 0.5 });
-      const radius = 10 + ((1800 - ping.ttlMs) / 1800) * 22;
-      graphics.lineStyle(2, 0xf2dfa8, ping.ttlMs / 1800);
+      const radius = this.settings.reducedMotion ? 18 : 10 + ((1800 - ping.ttlMs) / 1800) * 22;
+      const alpha = this.settings.reducedMotion ? 0.85 : ping.ttlMs / 1800;
+      graphics.lineStyle(2, 0xf2dfa8, alpha);
       graphics.strokeCircle(point.x, point.y + 12, radius);
     }
 

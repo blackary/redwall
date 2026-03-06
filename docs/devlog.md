@@ -28,4 +28,10 @@
 - Summary: Added a GitHub Pages deployment workflow, documented the current vertical slice and controls, and made the static build/deploy path explicit for the repo.
 - Tests run: `npm run build`
 - Known gaps: The built bundle is still large because Phaser ships in the main chunk; further split/polish work is possible, but the static deploy path is ready.
-- Commit hash: pending in git history after commit
+- Commit hash: `7ddcdcf`
+
+## 2026-03-06 Control and Pages Polish
+- Summary: Added persistent grid/reduced-motion settings in both menu and HUD, added explicit save-and-exit flow back to the resumable menu, fixed new-match versus resume config selection, cleaned up HUD key listener lifecycle, and hardened the Pages workflow to run unit and Playwright coverage before publishing `dist/`.
+- Tests run: `npm test`; `npm run test:e2e -- tests/e2e/bootstrap.spec.ts tests/e2e/economy-resume.spec.ts tests/e2e/skirmish-ai.spec.ts tests/e2e/settings.spec.ts`; `npm run build`
+- Known gaps: The main bundle is still large because Phaser remains in the primary chunk; deploy is now verified, but bundle splitting is still worth doing.
+- Commit hash: pending
