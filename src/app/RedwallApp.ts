@@ -1,42 +1,25 @@
 import Phaser from "phaser";
+import { GameSession } from "./GameSession";
+import { RedwallScene } from "../render/RedwallScene";
+import { Hud } from "../ui/Hud";
+import { stringToSeed } from "../core/random";
+import type { BuildingType, Difficulty, GameCommand, GameConfig, TilePoint, WorldState } from "../core/types";
 
-type AppMode = "menu" | "loading" | "skirmish";
+type AppMode = "menu" | "skirmish";
 
 type DebugApi = {
   getMode: () => AppMode;
-  startSkirmish: () => void;
+  startSkirmish: () => Promise<void>;
+  getSnapshot: () => WorldState | undefined;
+  advanceTicks: (count: number) => void;
+  getSelectedIds: () => string[];
+  setSelection: (ids: string[]) => void;
+  issueCommand: (command: GameCommand) => boolean;
+  setBuildMode: (buildingType?: BuildingType) => void;
+  getScreenPointForEntity: (id: string) => TilePoint | undefined;
+  getScreenPointForTile: (tile: TilePoint) => TilePoint | undefined;
+  getCameraState: () => { scrollX: number; scrollY: number; zoom: number } | undefined;
 };
-
-class BootstrapScene extends Phaser.Scene {
-  private readonly queryText: string;
-
-  public constructor(queryText: string) {
-    super("bootstrap");
-    this.queryText = queryText;
-  }
-
-  public create(): void {
-    this.cameras.main.setBackgroundColor("#172421");
-    this.add
-      .text(20, 20, "Redwall RTS bootstrap", {
-        fontFamily: "Georgia, serif",
-        fontSize: "28px",
-        color: "#f7ecd6",
-      })
-      .setDepth(10);
-    this.add
-      .text(20, 60, `Query: ${this.queryText || "(none)"}`, {
-        fontFamily: "monospace",
-        fontSize: "16px",
-        color: "#d8c9a4",
-      })
-      .setDepth(10);
-    this.add.rectangle(260, 220, 260, 160, 0x40634b, 1).setStrokeStyle(4, 0xe6d6ae);
-    this.add.circle(200, 220, 20, 0xd58b47);
-    this.add.circle(250, 245, 18, 0xb8d4b2);
-    this.add.circle(300, 210, 18, 0xb84c4c);
-  }
-}
 
 declare global {
   interface Window {
@@ -46,103 +29,133 @@ declare global {
 
 export class RedwallApp {
   private readonly root: HTMLDivElement;
-  private readonly search: string;
   private readonly params: URLSearchParams;
   private mode: AppMode = "menu";
   private phaserGame?: Phaser.Game;
+  private scene?: RedwallScene;
+  private session?: GameSession;
 
   public constructor(root: HTMLDivElement, search: string) {
     this.root = root;
-    this.search = search;
     this.params = new URLSearchParams(search);
     window.__REDWALL_DEBUG__ = {
       getMode: () => this.mode,
-      startSkirmish: () => this.startSkirmish(),
+      startSkirmish: async () => {
+        await this.startSkirmish();
+      },
+      getSnapshot: () => this.session?.getSnapshot(),
+      advanceTicks: (count: number) => {
+        this.session?.advanceTicks(count);
+      },
+      getSelectedIds: () => this.session?.getSessionState().selectedIds ?? [],
+      setSelection: (ids: string[]) => {
+        this.session?.setSelection(ids);
+      },
+      issueCommand: (command: GameCommand) => this.session?.issueCommand(command) ?? false,
+      setBuildMode: (buildingType?: BuildingType) => {
+        this.session?.setBuildMode(buildingType);
+      },
+      getScreenPointForEntity: (id: string) => this.scene?.getScreenPointForEntity(id),
+      getScreenPointForTile: (tile: TilePoint) => this.scene?.getScreenPointForTile(tile),
+      getCameraState: () => this.scene?.getCameraState(),
     };
   }
 
   public start(): void {
-    this.render();
+    this.renderMenu();
   }
 
-  private render(): void {
-    this.root.innerHTML = "";
-    const shell = document.createElement("div");
-    shell.className = "shell";
-    shell.innerHTML = `
-      <div class="frame">
-        <header class="hero">
-          <p class="eyebrow">Mossflower Frontiers</p>
-          <h1>Redwall RTS</h1>
-          <p class="lede">
-            Build the Abbey alliance, advance through the ages, and hold the woodland against vermin raiders.
-          </p>
-        </header>
-        <main class="layout">
-          <section class="menu-card" data-testid="main-menu">
-            <h2>Skirmish</h2>
-            <p class="small-copy">Static-hosted, deterministic, browser-only RTS prototype.</p>
-            <button class="primary-button" data-testid="start-skirmish">Start Mossflower Skirmish</button>
-            <dl class="info-grid">
-              <div><dt>Faction</dt><dd>Abbey alliance</dd></div>
-              <div><dt>Mode</dt><dd>1v1 skirmish</dd></div>
-              <div><dt>Seed</dt><dd data-testid="seed-value">${this.params.get("seed") ?? "auto"}</dd></div>
-            </dl>
-          </section>
-          <section class="status-card">
-            <div class="status-row">
-              <span>Mode</span>
-              <strong data-testid="app-mode">${this.mode}</strong>
-            </div>
-            <div class="status-row">
-              <span>E2E</span>
-              <strong data-testid="e2e-mode">${this.params.get("e2e") === "1" ? "enabled" : "disabled"}</strong>
-            </div>
-            <div class="status-row">
-              <span>Build</span>
-              <strong>Bootstrap</strong>
-            </div>
-          </section>
-        </main>
+  private renderMenu(): void {
+    this.root.innerHTML = `
+      <div class="shell">
+        <div class="frame">
+          <header class="hero">
+            <p class="eyebrow">Mossflower Frontiers</p>
+            <h1>Redwall RTS</h1>
+            <p class="lede">
+              Static-hosted woodland warfare with deterministic skirmishes, local persistence, and Abbey alliance command.
+            </p>
+          </header>
+          <main class="layout">
+            <section class="menu-card" data-testid="main-menu">
+              <h2>Skirmish</h2>
+              <p class="small-copy">Abbey alliance versus vermin raiders on Mossflower Meadows.</p>
+              <button class="primary-button" data-testid="start-skirmish">Start Mossflower Skirmish</button>
+              <dl class="info-grid">
+                <div><dt>Faction</dt><dd>Abbey alliance</dd></div>
+                <div><dt>Mode</dt><dd>1v1 skirmish</dd></div>
+                <div><dt>Seed</dt><dd data-testid="seed-value">${this.params.get("seed") ?? "mossflower"}</dd></div>
+              </dl>
+            </section>
+            <section class="status-card">
+              <div class="status-row"><span>Mode</span><strong data-testid="app-mode">${this.mode}</strong></div>
+              <div class="status-row"><span>E2E</span><strong data-testid="e2e-mode">${this.params.get("e2e") === "1" ? "enabled" : "disabled"}</strong></div>
+              <div class="status-row"><span>Build</span><strong>Stage 2</strong></div>
+              <div class="status-row"><span>Controls</span><strong>WASD + click</strong></div>
+            </section>
+          </main>
+        </div>
       </div>
     `;
-    this.root.append(shell);
-
-    const startButton = shell.querySelector<HTMLButtonElement>("[data-testid='start-skirmish']");
-    startButton?.addEventListener("click", () => this.startSkirmish());
+    this.root.querySelector<HTMLButtonElement>("[data-testid='start-skirmish']")?.addEventListener("click", () => {
+      void this.startSkirmish();
+    });
   }
 
-  private startSkirmish(): void {
-    this.mode = "loading";
-    this.render();
-    const host = document.createElement("div");
-    host.className = "canvas-host";
-    host.setAttribute("data-testid", "game-shell");
-    this.root.querySelector(".frame")?.append(host);
-    this.initializePhaser(host);
+  private async startSkirmish(): Promise<void> {
+    this.destroyGame();
     this.mode = "skirmish";
-    const modeLabel = this.root.querySelector("[data-testid='app-mode']");
-    if (modeLabel) {
-      modeLabel.textContent = this.mode;
+    this.root.innerHTML = `
+      <div class="game-shell">
+        <div class="battlefield-frame">
+          <div class="canvas-host" data-testid="game-shell"></div>
+          <div class="hud-host"></div>
+        </div>
+      </div>
+    `;
+    const canvasHost = this.root.querySelector<HTMLDivElement>("[data-testid='game-shell']");
+    const hudHost = this.root.querySelector<HTMLDivElement>(".hud-host");
+    if (!canvasHost || !hudHost) {
+      throw new Error("Game shell failed to mount");
     }
-  }
 
-  private initializePhaser(parent: HTMLDivElement): void {
-    if (this.phaserGame) {
-      this.phaserGame.destroy(true);
-    }
-
+    const config = this.buildConfig();
+    this.session = new GameSession(config);
+    this.scene = new RedwallScene(this.session);
     this.phaserGame = new Phaser.Game({
       type: Phaser.AUTO,
-      width: 960,
-      height: 540,
-      backgroundColor: "#172421",
-      parent,
-      scene: new BootstrapScene(this.search),
+      width: 1280,
+      height: 820,
+      backgroundColor: "#0f1715",
+      parent: canvasHost,
+      scene: this.scene,
       scale: {
         mode: Phaser.Scale.FIT,
         autoCenter: Phaser.Scale.CENTER_BOTH,
       },
     });
+    new Hud(this.session, hudHost);
+    this.session.start();
+  }
+
+  private buildConfig(): GameConfig {
+    const seedParam = this.params.get("seed") ?? "mossflower";
+    const difficulty = (this.params.get("difficulty") as Difficulty | null) ?? "normal";
+    return {
+      seed: /^\d+$/.test(seedParam) ? Number(seedParam) : stringToSeed(seedParam),
+      mapPreset: "mossflowerMeadows",
+      difficulty,
+      e2e: this.params.get("e2e") === "1",
+    };
+  }
+
+  private destroyGame(): void {
+    this.session?.destroy();
+    this.session = undefined;
+    if (this.phaserGame) {
+      this.phaserGame.destroy(true);
+      this.phaserGame = undefined;
+    }
+    this.scene = undefined;
   }
 }
