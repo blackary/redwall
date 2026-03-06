@@ -65,3 +65,9 @@
 - Tests run: `npm test`; `npm run test:e2e`; `npm run build`
 - Known gaps: The units now read much more clearly as Redwall creatures at gameplay scale, but a later pass could still add bespoke hand-drawn selection portraits and higher-detail sprite-atlas animation.
 - Commit hash: `0e1e71d`
+
+## 2026-03-06 Sidebar Guidance Pass
+- Summary: Restored a persistent right-side advisor panel, moved it into its own HUD column so it no longer blocks the command card, and surfaced detailed per-action build, train, research, rally, and order guidance with costs, timing, unlock age, footprint, and explicit placement instructions.
+- Tests run: `npm test`; `npm run test:e2e`; `npm run build`
+- Known gaps: The sidebar now makes build and production flow legible again, but the next usability pass should add stronger portrait/icon identity and more advanced queue management interactions.
+- Commit hash: `50bc4ee`
