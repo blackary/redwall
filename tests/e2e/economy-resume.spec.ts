@@ -1,8 +1,9 @@
 import { expect, test } from "@playwright/test";
+import { continueSkirmish, startSkirmish } from "./helpers";
 
 test("economy loop progresses and latest skirmish resumes after reload", async ({ page }) => {
   await page.goto("/?e2e=1&seed=economy");
-  await page.getByTestId("start-skirmish").click();
+  await startSkirmish(page);
 
   const ids = await page.evaluate(() => {
     const snapshot = window.__REDWALL_DEBUG__?.getSnapshot();
@@ -89,8 +90,7 @@ test("economy loop progresses and latest skirmish resumes after reload", async (
 
   await page.reload();
   await expect(page.getByTestId("continue-skirmish")).toBeEnabled();
-  await page.getByTestId("continue-skirmish").click();
-  await expect(page.getByTestId("game-shell")).toBeVisible();
+  await continueSkirmish(page);
 
   const afterReload = await page.evaluate(() => {
     const snapshot = window.__REDWALL_DEBUG__?.getSnapshot();

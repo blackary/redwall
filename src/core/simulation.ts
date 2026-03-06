@@ -9,6 +9,7 @@ import type {
   GameCommand,
   GameConfig,
   MapData,
+  Outcome,
   PlayerId,
   ResourceBag,
   ResourceEntity,
@@ -187,6 +188,12 @@ export class Simulation {
 
   public serialize(): WorldState {
     return this.getSnapshot();
+  }
+
+  public forceOutcome(outcome: Outcome): void {
+    this.world.outcome = outcome;
+    this.world.players.player.defeated = outcome === "playerDefeat";
+    this.world.players.ai.defeated = outcome === "playerVictory";
   }
 
   private createInitialWorld(config: GameConfig): WorldState {

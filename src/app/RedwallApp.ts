@@ -1,11 +1,10 @@
-import Phaser from "phaser";
-import { GameSession } from "./GameSession";
-import { RedwallScene } from "../render/RedwallScene";
-import { Hud } from "../ui/Hud";
 import { stringToSeed } from "../core/random";
 import { createSnapshot } from "../core/save";
-import type { BuildingType, Difficulty, GameCommand, GameConfig, TilePoint, WorldState } from "../core/types";
+import type { BuildingType, Difficulty, GameCommand, GameConfig, Outcome, TilePoint, WorldState } from "../core/types";
 import { BrowserStorage, type GameSettings, type ResumeMetadata } from "../persistence/storage";
+import type { GameSession } from "./GameSession";
+import type { RedwallScene } from "../render/RedwallScene";
+import type { Hud } from "../ui/Hud";
 
 type AppMode = "menu" | "skirmish";
 
@@ -23,6 +22,7 @@ type DebugApi = {
   clearSave: () => Promise<void>;
   hasResume: () => boolean;
   getSettings: () => GameSettings;
+  forceOutcome: (outcome: Outcome) => void;
   getScreenPointForEntity: (id: string) => TilePoint | undefined;
   getScreenPointForTile: (tile: TilePoint) => TilePoint | undefined;
   getCameraState: () => { scrollX: number; scrollY: number; zoom: number } | undefined;
@@ -38,7 +38,7 @@ export class RedwallApp {
   private readonly root: HTMLDivElement;
   private readonly params: URLSearchParams;
   private mode: AppMode = "menu";
-  private phaserGame?: Phaser.Game;
+  private phaserGame?: { destroy: (removeCanvas: boolean, noReturn?: boolean) => void };
   private scene?: RedwallScene;
   private session?: GameSession;
   private hud?: Hud;
@@ -77,6 +77,9 @@ export class RedwallApp {
       },
       hasResume: () => Boolean(this.resumeMeta),
       getSettings: () => ({ ...this.settings }),
+      forceOutcome: (outcome: Outcome) => {
+        this.session?.forceOutcome(outcome);
+      },
       getScreenPointForEntity: (id: string) => this.scene?.getScreenPointForEntity(id),
       getScreenPointForTile: (tile: TilePoint) => this.scene?.getScreenPointForTile(tile),
       getCameraState: () => this.scene?.getCameraState(),
@@ -197,6 +200,16 @@ export class RedwallApp {
     }
 
     const config = this.buildConfig(resumeMeta);
+    const [{ default: Phaser }, sessionModule, sceneModule, hudModule] = await Promise.all([
+      import("phaser"),
+      import("./GameSession"),
+      import("../render/RedwallScene"),
+      import("../ui/Hud"),
+    ]);
+    const { GameSession } = sessionModule;
+    const { RedwallScene } = sceneModule;
+    const { Hud } = hudModule;
+
     this.session = new GameSession(config, existingWorld);
     this.scene = new RedwallScene(this.session, this.settings);
     this.phaserGame = new Phaser.Game({
@@ -215,6 +228,8 @@ export class RedwallApp {
       settings: this.settings,
       onSaveAndExit: async () => this.saveAndExitToMenu(),
       onSettingsChange: (settings) => this.updateSettings(settings),
+      onReturnToMenu: async () => this.returnToMenu(),
+      onStartNewMatch: async () => this.startSkirmish(),
     });
     this.autosaveTimer = this.session.getElapsedMs();
     this.session.subscribe(() => {
@@ -316,5 +331,15 @@ export class RedwallApp {
     this.resumeMeta = this.storage.getResumeMetadata();
     this.renderMenu();
     return saved;
+  }
+
+  private async returnToMenu(): Promise<void> {
+    if (this.session?.getWorld().outcome !== "ongoing") {
+      await this.storage.clearSnapshot();
+    }
+    this.destroyGame();
+    this.mode = "menu";
+    this.resumeMeta = this.storage.getResumeMetadata();
+    this.renderMenu();
   }
 }

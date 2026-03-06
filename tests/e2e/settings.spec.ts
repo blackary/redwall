@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { startSkirmish } from "./helpers";
 
 test("settings persist across reload and save-and-exit returns to a resumable menu", async ({ page }) => {
   await page.goto("/?e2e=1&seed=settings");
@@ -15,7 +16,7 @@ test("settings persist across reload and save-and-exit returns to a resumable me
   await expect(page.getByTestId("show-grid-toggle")).toBeChecked();
   await expect(page.getByTestId("reduced-motion-toggle")).toBeChecked();
 
-  await page.getByTestId("start-skirmish").click();
+  await startSkirmish(page);
   await expect(page.getByTestId("toggle-grid-button")).toHaveText("Grid: On");
   await expect(page.getByTestId("toggle-motion-button")).toHaveText("Motion: Reduced");
 

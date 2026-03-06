@@ -1,8 +1,9 @@
 import { expect, test } from "@playwright/test";
+import { startSkirmish } from "./helpers";
 
 test("selected production buildings show current work and queued items", async ({ page }) => {
   await page.goto("/?e2e=1&seed=production-progress");
-  await page.getByTestId("start-skirmish").click();
+  await startSkirmish(page);
 
   const workerId = await page.evaluate(() => {
     const snapshot = window.__REDWALL_DEBUG__?.getSnapshot();

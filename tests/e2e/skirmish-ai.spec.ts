@@ -1,8 +1,9 @@
 import { expect, test } from "@playwright/test";
+import { startSkirmish } from "./helpers";
 
 test("ai expands and sends pressure in a seeded skirmish", async ({ page }) => {
   await page.goto("/?e2e=1&seed=ai-pressure");
-  await page.getByTestId("start-skirmish").click();
+  await startSkirmish(page);
 
   await page.evaluate(() => window.__REDWALL_DEBUG__?.advanceTicks(260));
 

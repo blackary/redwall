@@ -41,3 +41,9 @@
 - Tests run: `npm test`; `npm run test:e2e -- tests/e2e/bootstrap.spec.ts tests/e2e/economy-resume.spec.ts tests/e2e/skirmish-ai.spec.ts tests/e2e/settings.spec.ts tests/e2e/production-progress.spec.ts`; `npm run build`
 - Known gaps: Rendering is still immediate-mode Phaser graphics rather than sprite-atlas art, so there is room for a deeper illustration pass and bundle splitting later.
 - Commit hash: `892b3d9`
+
+## 2026-03-06 Match Flow and CI Hardening
+- Summary: Added pause, victory, and defeat overlays with restart/menu flow; introduced deterministic forced-outcome test hooks; split the heavy skirmish engine out of the menu entry so the static shell loads first; fixed the hidden sidebar overlay intercepting clicks; stabilized e2e startup/helpers; and changed the Pages workflow to run on every push so build, Playwright, and deploy are validated per commit.
+- Tests run: `npm test`; `npm run test:e2e -- tests/e2e/bootstrap.spec.ts tests/e2e/economy-resume.spec.ts tests/e2e/skirmish-ai.spec.ts tests/e2e/settings.spec.ts tests/e2e/production-progress.spec.ts tests/e2e/match-flow.spec.ts`; `npm run build`
+- Known gaps: Phaser still ships as a large deferred chunk, so initial menu load is lighter now but there is still room for deeper engine chunking or asset-atlas optimization later.
+- Commit hash: pending

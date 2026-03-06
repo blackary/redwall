@@ -224,6 +224,7 @@ select {
   flex: 1;
   display: grid;
   gap: 12px;
+  position: relative;
 }
 
 .hud-bar,
@@ -370,6 +371,72 @@ select {
   border: 1px solid rgba(232, 215, 173, 0.15);
 }
 
+.hud-overlay {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(7, 11, 10, 0.68);
+  border-radius: 28px;
+  z-index: 2;
+}
+
+.hud-overlay[hidden] {
+  display: none;
+}
+
+.overlay-card {
+  width: min(100%, 420px);
+  display: grid;
+  gap: 16px;
+  padding: 24px;
+  border-radius: 24px;
+  border: 1px solid rgba(232, 215, 173, 0.22);
+  background: linear-gradient(180deg, rgba(34, 45, 41, 0.98), rgba(12, 18, 16, 0.98));
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.4);
+}
+
+.overlay-card h2 {
+  margin: 0;
+  font-size: 2rem;
+  line-height: 1;
+}
+
+.overlay-copy {
+  margin: 0;
+  color: #d7ceb7;
+}
+
+.overlay-stats {
+  margin: 0;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.overlay-stats div {
+  padding: 12px 14px;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.overlay-stats dt {
+  color: #c4b79c;
+  font-size: 0.82rem;
+}
+
+.overlay-stats dd {
+  margin: 6px 0 0;
+  font-size: 1.05rem;
+}
+
+.overlay-actions {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 10px;
+}
+
 @media (max-width: 960px) {
   .shell {
     padding: 12px;
@@ -400,5 +467,13 @@ select {
   .setting-row,
   .meta-actions {
     justify-content: space-between;
+  }
+
+  .hud-overlay {
+    padding: 14px;
+  }
+
+  .overlay-stats {
+    grid-template-columns: 1fr;
   }
 }

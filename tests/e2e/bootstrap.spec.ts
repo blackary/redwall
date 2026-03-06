@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { startSkirmish } from "./helpers";
 
 test("bootstrap app loads and starts skirmish shell", async ({ page }) => {
   await page.goto("/?e2e=1&seed=bootstrap");
@@ -7,10 +8,7 @@ test("bootstrap app loads and starts skirmish shell", async ({ page }) => {
   await expect(page.getByTestId("e2e-mode")).toHaveText("enabled");
   await expect(page.getByTestId("seed-value")).toHaveText("bootstrap");
 
-  await page.getByTestId("start-skirmish").click();
-
-  await expect(page.getByTestId("game-shell")).toBeVisible();
-  await expect(page.getByTestId("hud")).toBeVisible();
+  await startSkirmish(page);
 
   const mode = await page.evaluate(() => window.__REDWALL_DEBUG__?.getMode());
   expect(mode).toBe("skirmish");
@@ -18,7 +16,7 @@ test("bootstrap app loads and starts skirmish shell", async ({ page }) => {
 
 test("camera, selection, and move commands work", async ({ page }) => {
   await page.goto("/?e2e=1&seed=movement");
-  await page.getByTestId("start-skirmish").click();
+  await startSkirmish(page);
 
   const beforeCamera = await page.evaluate(() => window.__REDWALL_DEBUG__?.getCameraState());
   await page.keyboard.down("KeyD");
@@ -73,7 +71,7 @@ test("camera, selection, and move commands work", async ({ page }) => {
 
 test("move mode supports left click command placement", async ({ page }) => {
   await page.goto("/?e2e=1&seed=move-mode");
-  await page.getByTestId("start-skirmish").click();
+  await startSkirmish(page);
 
   const workerId = await page.evaluate(() => {
     const snapshot = window.__REDWALL_DEBUG__?.getSnapshot();

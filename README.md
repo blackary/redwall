@@ -10,6 +10,7 @@ Browser-only real-time strategy prototype inspired by Age of Empires, reframed a
 - Economy, building placement, unit production, ranged/melee combat, towers, and fog of war
 - Original stylized in-engine art for units, buildings, terrain, and resources
 - Building work-state UI for construction, training, research, and age-up progress
+- Pause menu plus victory/defeat overlays with restart and return-to-menu flow
 - Local resume via IndexedDB + localStorage metadata
 - GitHub Pages deployment workflow that publishes the built `dist/` artifact
 
@@ -33,6 +34,7 @@ Browser-only real-time strategy prototype inspired by Age of Empires, reframed a
 - `Grid` toggle in HUD: sharpen tile outlines for precise placement
 - `Motion` toggle in HUD: reduce animated command pings
 - `Save & Exit`: save the current skirmish and return to the menu with `Continue Last Match` ready
+- `Space`: pause or resume the skirmish
 
 ## Local development
 ```bash
@@ -54,7 +56,8 @@ The Playwright suite covers:
 - camera/selection/movement loop
 - economy + autosave/resume
 - production queue visibility
+- pause, victory, defeat, and completed-match flow
 - AI skirmish expansion/pressure
 
 ## GitHub Pages
-The Pages workflow in [.github/workflows/deploy.yml](/Users/zachary/projects/redwall/.github/workflows/deploy.yml) installs dependencies, runs `npm test`, runs `npm run test:e2e`, builds the app with `npm run build`, and deploys the `dist/` output. Because Vite is configured with `base: "./"`, the generated `index.html` and asset paths are GitHub Pages compatible without router rewrites.
+The Pages workflow in [.github/workflows/deploy.yml](/Users/zachary/projects/redwall/.github/workflows/deploy.yml) runs on every push, installs dependencies, runs `npm test`, runs `npm run test:e2e`, builds the app with `npm run build`, and deploys the `dist/` output. Because Vite is configured with `base: "./"`, the generated `index.html` and asset paths are GitHub Pages compatible without router rewrites.

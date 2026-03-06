@@ -42,6 +42,8 @@ interface HudOptions {
   settings: GameSettings;
   onSaveAndExit: () => Promise<unknown> | void;
   onSettingsChange: (settings: GameSettings) => void;
+  onReturnToMenu: () => Promise<unknown> | void;
+  onStartNewMatch: () => Promise<unknown> | void;
 }
 
 export class Hud {
@@ -60,9 +62,11 @@ export class Hud {
   private readonly gridButton: HTMLButtonElement;
   private readonly motionButton: HTMLButtonElement;
   private readonly saveExitButton: HTMLButtonElement;
+  private readonly overlay: HTMLDivElement;
   private readonly handleKeydownBound: (event: KeyboardEvent) => void;
   private readonly unsubscribe: () => void;
   private settings: GameSettings;
+  private lastActionSignature = "";
 
   public constructor(session: GameSession, root: HTMLDivElement, options: HudOptions) {
     this.session = session;
@@ -106,6 +110,7 @@ export class Hud {
           <p class="hint" data-testid="outcome-label">Hold the field. Destroy the enemy host.</p>
         </div>
       </section>
+      <div class="hud-overlay" data-testid="hud-overlay" hidden></div>
     `;
 
     this.minimapCanvas = this.root.querySelector("[data-testid='minimap']") as HTMLCanvasElement;
@@ -127,6 +132,7 @@ export class Hud {
     this.gridButton = this.root.querySelector("[data-testid='toggle-grid-button']") as HTMLButtonElement;
     this.motionButton = this.root.querySelector("[data-testid='toggle-motion-button']") as HTMLButtonElement;
     this.saveExitButton = this.root.querySelector("[data-testid='save-exit-button']") as HTMLButtonElement;
+    this.overlay = this.root.querySelector("[data-testid='hud-overlay']") as HTMLDivElement;
 
     this.pauseButton.addEventListener("click", () => {
       const next = !this.session.getSessionState().paused;
@@ -189,10 +195,11 @@ export class Hud {
     this.gridButton.textContent = this.settings.showGrid ? "Grid: On" : "Grid: Off";
     this.motionButton.textContent = this.settings.reducedMotion ? "Motion: Reduced" : "Motion: Full";
     this.saveExitButton.textContent = world.outcome === "ongoing" ? "Save & Exit" : "Return to Menu";
+    this.renderOverlay(world.outcome, sessionState.paused, player.age, world.elapsedMs);
 
     const selected = this.session.getSelectedEntities();
+    const actionSignature = this.getActionSignature(selected, player.age);
     this.selectionHost.innerHTML = "";
-    this.actionsHost.innerHTML = "";
     if (selected.length === 0) {
       this.selectionHost.innerHTML = "<p class='hint'>No current selection.</p>";
       this.hintHost.textContent = sessionState.buildMode
@@ -200,20 +207,114 @@ export class Hud {
         : sessionState.commandMode
           ? `${formatLabel(sessionState.commandMode)} mode armed. Left click to issue that order.`
           : "Select units with left click. Right click, Ctrl+click, or Alt+left-click to command.";
+      this.renderActionsPanel(actionSignature, () => {
+        this.actionsHost.innerHTML = "";
+      });
     } else if (selected.length === 1) {
       const entity = selected[0];
       this.selectionHost.append(this.renderSelectionCard(entity));
-      this.renderActions(entity);
+      this.renderActionsPanel(actionSignature, () => {
+        this.actionsHost.innerHTML = "";
+        this.renderActions(entity);
+      });
     } else {
       const wrapper = document.createElement("div");
       wrapper.className = "selection-summary";
       wrapper.innerHTML = `<div class="selection-title">${selected.length} units selected</div>`;
       this.selectionHost.append(wrapper);
-      this.renderGroupActions(selected.filter((entity): entity is UnitEntity => entity.kind === "unit"));
+      this.renderActionsPanel(actionSignature, () => {
+        this.actionsHost.innerHTML = "";
+        this.renderGroupActions(selected.filter((entity): entity is UnitEntity => entity.kind === "unit"));
+      });
       this.hintHost.textContent = "Group selected. Use Move, Attack, or Gather modes for left-click orders.";
     }
 
     this.drawMinimap();
+  }
+
+  private renderActionsPanel(signature: string, render: () => void): void {
+    if (signature === this.lastActionSignature) {
+      return;
+    }
+    render();
+    this.lastActionSignature = signature;
+  }
+
+  private getActionSignature(selected: Entity[], age: Age): string {
+    if (selected.length === 0) {
+      return "none";
+    }
+    return selected.map((entity) => {
+      if (entity.kind === "unit") {
+        return `unit:${entity.id}:${entity.unitType}`;
+      }
+      if (entity.kind === "building") {
+        return `building:${entity.id}:${entity.buildingType}:${entity.completed}:${age}`;
+      }
+      return `resource:${entity.id}`;
+    }).join("|");
+  }
+
+  private renderOverlay(outcome: "ongoing" | "playerVictory" | "playerDefeat", paused: boolean, age: Age, elapsedMs: number): void {
+    if (outcome === "ongoing" && !paused) {
+      this.overlay.hidden = true;
+      this.overlay.innerHTML = "";
+      return;
+    }
+
+    const isOutcome = outcome !== "ongoing";
+    const title = outcome === "playerVictory"
+      ? "Victory in Mossflower"
+      : outcome === "playerDefeat"
+        ? "The Abbey Has Fallen"
+        : "Skirmish Paused";
+    const summary = outcome === "playerVictory"
+      ? "The vermin host is broken. Regroup your woodland fighters and press the advantage."
+      : outcome === "playerDefeat"
+        ? "The raiders overran the Abbey alliance. Re-form the line and try a different opening."
+        : "Orders are suspended. Review queues, plan your next age-up, or save the field for later.";
+    const time = formatDuration(elapsedMs);
+
+    this.overlay.hidden = false;
+    this.overlay.innerHTML = `
+      <div class="overlay-card" data-testid="${isOutcome ? "outcome-screen" : "pause-menu"}">
+        <p class="eyebrow">${isOutcome ? "Match Result" : "Pause Menu"}</p>
+        <h2 data-testid="overlay-title">${title}</h2>
+        <p class="overlay-copy">${summary}</p>
+        <dl class="overlay-stats">
+          <div><dt>Time</dt><dd data-testid="overlay-time">${time}</dd></div>
+          <div><dt>Age</dt><dd data-testid="overlay-age">${formatAge(age)}</dd></div>
+        </dl>
+        <div class="overlay-actions">
+          ${isOutcome
+            ? `
+              <button class="primary-button" data-testid="overlay-new-skirmish">Start New Skirmish</button>
+              <button class="secondary-button" data-testid="overlay-return-menu">Return to Menu</button>
+            `
+            : `
+              <button class="primary-button" data-testid="overlay-resume">Resume Battle</button>
+              <button class="secondary-button" data-testid="overlay-save-exit">Save & Exit</button>
+            `}
+        </div>
+      </div>
+    `;
+
+    if (isOutcome) {
+      this.overlay.querySelector<HTMLButtonElement>("[data-testid='overlay-new-skirmish']")?.addEventListener("click", () => {
+        void this.options.onStartNewMatch();
+      });
+      this.overlay.querySelector<HTMLButtonElement>("[data-testid='overlay-return-menu']")?.addEventListener("click", () => {
+        void this.options.onReturnToMenu();
+      });
+      return;
+    }
+
+    this.overlay.querySelector<HTMLButtonElement>("[data-testid='overlay-resume']")?.addEventListener("click", () => {
+      this.session.setPaused(false);
+    });
+    this.overlay.querySelector<HTMLButtonElement>("[data-testid='overlay-save-exit']")?.addEventListener("click", () => {
+      void this.options.onSaveAndExit();
+    });
   }
 
   private renderSelectionCard(entity: Entity): HTMLDivElement {
@@ -450,6 +551,17 @@ export class Hud {
 
   private handleKeydown(event: KeyboardEvent): void {
     if (event.repeat) {
+      return;
+    }
+    if (event.code === "Space") {
+      event.preventDefault();
+      this.session.setPaused(!this.session.getSessionState().paused);
+      return;
+    }
+    if (this.session.getWorld().outcome !== "ongoing") {
+      return;
+    }
+    if (this.session.getSessionState().paused) {
       return;
     }
     if (event.code === "Escape") {

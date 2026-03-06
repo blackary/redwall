@@ -5,6 +5,7 @@ import type {
   Difficulty,
   GameCommand,
   GameConfig,
+  Outcome,
   SessionState,
   TilePoint,
   WorldState,
@@ -162,6 +163,12 @@ export class GameSession {
     return Object.values(this.getWorld().entities)
       .filter((entity) => entity.kind === "unit" && entity.playerId === "player")
       .map((entity) => entity.id);
+  }
+
+  public forceOutcome(outcome: Outcome): void {
+    this.simulation.forceOutcome(outcome);
+    this.dirty = true;
+    this.notify();
   }
 
   private loop(timestamp: number): void {
