@@ -4,6 +4,7 @@ import { tileIndex } from "../core/map";
 import type { BuildingEntity, BuildingType, Entity, TilePoint, UnitEntity, WorldState } from "../core/types";
 import { GameSession } from "../app/GameSession";
 import type { GameSettings } from "../persistence/storage";
+import { getBoxSelectionIds } from "./selection";
 
 type Ping = { tile: TilePoint; ttlMs: number };
 type BuildingPalette = {
@@ -22,6 +23,12 @@ type UnitPalette = {
   shadow: number;
 };
 type UnitSpecies = "mouse" | "shrew" | "otter" | "hare" | "badger" | "machine";
+type DragPoint = {
+  screenX: number;
+  screenY: number;
+  worldX: number;
+  worldY: number;
+};
 
 function clamp(value: number, minimum: number, maximum: number): number {
   return Math.min(maximum, Math.max(minimum, value));
@@ -154,8 +161,8 @@ export class RedwallScene extends Phaser.Scene {
   private terrainGraphics?: Phaser.GameObjects.Graphics;
   private entityGraphics?: Phaser.GameObjects.Graphics;
   private overlayGraphics?: Phaser.GameObjects.Graphics;
-  private dragStart?: TilePoint;
-  private dragCurrent?: TilePoint;
+  private dragStart?: DragPoint;
+  private dragCurrent?: DragPoint;
   private cameraKeys?: Record<string, Phaser.Input.Keyboard.Key>;
   private pings: Ping[] = [];
   private isPanning = false;
@@ -210,7 +217,12 @@ export class RedwallScene extends Phaser.Scene {
       if (this.isSecondaryCommand(pointer)) {
         return;
       }
-      this.dragStart = this.screenToTile(pointer.worldX, pointer.worldY);
+      this.dragStart = {
+        screenX: pointer.x,
+        screenY: pointer.y,
+        worldX: pointer.worldX,
+        worldY: pointer.worldY,
+      };
       this.dragCurrent = this.dragStart;
     });
 
@@ -226,7 +238,12 @@ export class RedwallScene extends Phaser.Scene {
       if (!this.dragStart) {
         return;
       }
-      this.dragCurrent = this.screenToTile(pointer.worldX, pointer.worldY);
+      this.dragCurrent = {
+        screenX: pointer.x,
+        screenY: pointer.y,
+        worldX: pointer.worldX,
+        worldY: pointer.worldY,
+      };
     });
 
     this.input.on("pointerup", (pointer: Phaser.Input.Pointer) => {
@@ -245,7 +262,13 @@ export class RedwallScene extends Phaser.Scene {
       if (!this.dragStart) {
         return;
       }
-      const end = this.screenToTile(pointer.worldX, pointer.worldY);
+      const endPoint = {
+        screenX: pointer.x,
+        screenY: pointer.y,
+        worldX: pointer.worldX,
+        worldY: pointer.worldY,
+      };
+      const end = this.screenToTile(endPoint.worldX, endPoint.worldY);
       const sessionState = this.session.getSessionState();
       if (sessionState.buildMode || sessionState.commandMode) {
         this.handlePrimaryCommand(end);
@@ -253,9 +276,12 @@ export class RedwallScene extends Phaser.Scene {
         return;
       }
       const start = this.dragStart;
-      const distance = Math.abs(start.x - end.x) + Math.abs(start.y - end.y);
-      if (distance > 1) {
-        this.session.selectUnitsInBox(start, end);
+      const distance = Phaser.Math.Distance.Between(start.screenX, start.screenY, endPoint.screenX, endPoint.screenY);
+      if (distance > 10) {
+        this.selectEntitiesInWorldRect(
+          { x: start.worldX, y: start.worldY },
+          { x: endPoint.worldX, y: endPoint.worldY },
+        );
         this.lastSelectionClick = undefined;
       } else {
         this.handleSelection(pointer.worldX, pointer.worldY, end, {
@@ -297,6 +323,10 @@ export class RedwallScene extends Phaser.Scene {
         ? { x: entity.tile.x + 0.5, y: entity.tile.y + 0.5 }
         : { x: entity.tile.x + 0.5, y: entity.tile.y + 0.5 };
     return this.getScreenPointForTile(tile);
+  }
+
+  public selectInScreenRect(from: TilePoint, to: TilePoint): void {
+    this.selectEntitiesInWorldRect(this.screenToWorld(from), this.screenToWorld(to));
   }
 
   public getCameraState() {
@@ -464,22 +494,14 @@ export class RedwallScene extends Phaser.Scene {
     selectedIds: string[],
   ): void {
     if (this.dragStart && this.dragCurrent) {
-      const start = this.tileToScreen(this.dragStart);
-      const end = this.tileToScreen(this.dragCurrent);
+      const minX = Math.min(this.dragStart.worldX, this.dragCurrent.worldX);
+      const minY = Math.min(this.dragStart.worldY, this.dragCurrent.worldY);
+      const width = Math.abs(this.dragCurrent.worldX - this.dragStart.worldX);
+      const height = Math.abs(this.dragCurrent.worldY - this.dragStart.worldY);
       graphics.lineStyle(2, 0xf2dfa8, 0.9);
       graphics.fillStyle(0xf2dfa8, 0.08);
-      graphics.fillRect(
-        Math.min(start.x, end.x),
-        Math.min(start.y, end.y),
-        Math.abs(end.x - start.x),
-        Math.abs(end.y - start.y),
-      );
-      graphics.strokeRect(
-        Math.min(start.x, end.x),
-        Math.min(start.y, end.y),
-        Math.abs(end.x - start.x),
-        Math.abs(end.y - start.y),
-      );
+      graphics.fillRect(minX, minY, width, height);
+      graphics.strokeRect(minX, minY, width, height);
     }
 
     if (buildMode && this.input.activePointer) {
@@ -1212,6 +1234,11 @@ export class RedwallScene extends Phaser.Scene {
     return bestUnit;
   }
 
+  private selectEntitiesInWorldRect(from: TilePoint, to: TilePoint): void {
+    const selectedIds = getBoxSelectionIds(this.session.getWorld(), from, to, (tile) => this.tileToScreen(tile));
+    this.session.setSelection(selectedIds);
+  }
+
   private isEntityVisibleToPlayer(world: WorldState, entity: Entity): boolean {
     if (entity.kind === "resource") {
       return world.players.player.explored[tileIndex(world.map, entity.tile)];
@@ -1229,6 +1256,16 @@ export class RedwallScene extends Phaser.Scene {
     return {
       x: this.origin.x + (tile.x - tile.y) * (this.tileWidth / 2),
       y: this.origin.y + (tile.x + tile.y) * (this.tileHeight / 2),
+    };
+  }
+
+  private screenToWorld(point: TilePoint): TilePoint {
+    const camera = this.cameras.main;
+    const scaleX = this.scale.displaySize.width / this.scale.gameSize.width;
+    const scaleY = this.scale.displaySize.height / this.scale.gameSize.height;
+    return {
+      x: point.x / scaleX / camera.zoom + camera.scrollX,
+      y: point.y / scaleY / camera.zoom + camera.scrollY,
     };
   }
 

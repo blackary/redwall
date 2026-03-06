@@ -28,6 +28,7 @@ type DebugApi = {
   forceOutcome: (outcome: Outcome) => void;
   getScreenPointForEntity: (id: string) => TilePoint | undefined;
   getScreenPointForTile: (tile: TilePoint) => TilePoint | undefined;
+  selectInScreenRect: (from: TilePoint, to: TilePoint) => void;
   getCameraState: () => { scrollX: number; scrollY: number; zoom: number } | undefined;
 };
 
@@ -91,6 +92,9 @@ export class RedwallApp {
       },
       getScreenPointForEntity: (id: string) => this.scene?.getScreenPointForEntity(id),
       getScreenPointForTile: (tile: TilePoint) => this.scene?.getScreenPointForTile(tile),
+      selectInScreenRect: (from: TilePoint, to: TilePoint) => {
+        this.scene?.selectInScreenRect(from, to);
+      },
       getCameraState: () => this.scene?.getCameraState(),
     };
   }
