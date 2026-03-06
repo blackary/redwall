@@ -1,8 +1,53 @@
 import { GameSession } from "../app/GameSession";
-import { BUILDING_DEFINITIONS, RESEARCH_DEFINITIONS, UNIT_DEFINITIONS } from "../core/content";
+import { AGE_ORDER, BUILDING_DEFINITIONS, RESEARCH_DEFINITIONS, UNIT_DEFINITIONS } from "../core/content";
 import { tileIndex } from "../core/map";
-import type { Age, BuildingEntity, BuildingType, Entity, ResearchId, UnitEntity, UnitType } from "../core/types";
+import type {
+  Age,
+  BuildingEntity,
+  BuildingType,
+  Entity,
+  ResearchId,
+  ResourceBag,
+  TilePoint,
+  UnitEntity,
+  UnitType,
+} from "../core/types";
 import type { GameSettings } from "../persistence/storage";
+
+type VisibleBounds = {
+  minX: number;
+  minY: number;
+  maxX: number;
+  maxY: number;
+};
+
+type ActionDescriptor = {
+  label: string;
+  testId: string;
+  action: () => void;
+  detail?: string;
+  cost?: Partial<ResourceBag>;
+  disabled?: boolean;
+  disabledReason?: string;
+  hotkeyLabel?: string;
+  hotkeyCode?: string;
+  tone?: "command" | "build" | "train" | "research" | "age";
+};
+
+const ACTION_GRID_HOTKEYS = [
+  { label: "Q", code: "KeyQ" },
+  { label: "W", code: "KeyW" },
+  { label: "E", code: "KeyE" },
+  { label: "R", code: "KeyR" },
+  { label: "A", code: "KeyA" },
+  { label: "S", code: "KeyS" },
+  { label: "D", code: "KeyD" },
+  { label: "F", code: "KeyF" },
+  { label: "Z", code: "KeyZ" },
+  { label: "X", code: "KeyX" },
+  { label: "C", code: "KeyC" },
+  { label: "V", code: "KeyV" },
+] as const;
 
 function formatAge(age: Age): string {
   return age === "settlement" ? "Settlement Age" : age === "abbey" ? "Abbey Age" : "Warhost Age";
@@ -14,6 +59,44 @@ function formatLabel(identifier: string): string {
 
 function formatDuration(ms: number): string {
   return `${Math.max(0.2, ms / 1000).toFixed(1)}s`;
+}
+
+function formatClock(ms: number): string {
+  const totalSeconds = Math.max(0, Math.floor(ms / 1000));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes.toString().padStart(2, "0")}:${seconds.toString().padStart(2, "0")}`;
+}
+
+function formatCost(cost?: Partial<ResourceBag>): string {
+  if (!cost) {
+    return "";
+  }
+  const parts: string[] = [];
+  if (cost.food) {
+    parts.push(`${cost.food}F`);
+  }
+  if (cost.timber) {
+    parts.push(`${cost.timber}W`);
+  }
+  if (cost.stone) {
+    parts.push(`${cost.stone}S`);
+  }
+  if (cost.iron) {
+    parts.push(`${cost.iron}I`);
+  }
+  return parts.join(" ");
+}
+
+function bagHasCost(bag: ResourceBag, cost: Partial<ResourceBag>): boolean {
+  return (cost.food ?? 0) <= bag.food
+    && (cost.timber ?? 0) <= bag.timber
+    && (cost.stone ?? 0) <= bag.stone
+    && (cost.iron ?? 0) <= bag.iron;
+}
+
+function isAgeUnlocked(currentAge: Age, requiredAge: Age): boolean {
+  return AGE_ORDER.indexOf(currentAge) >= AGE_ORDER.indexOf(requiredAge);
 }
 
 function getQueuedItemLabel(item: BuildingEntity["queue"][number]): string {
@@ -38,12 +121,70 @@ function getQueuedItemTotalMs(item: BuildingEntity["queue"][number]): number {
     : RESEARCH_DEFINITIONS.warhostAge.researchTimeMs;
 }
 
+function getSelectionCountLabel(selected: Entity[]): string {
+  if (selected.length === 0) {
+    return "No Selection";
+  }
+  if (selected.length === 1) {
+    const entity = selected[0];
+    if (entity.kind === "unit") {
+      return "1 Unit";
+    }
+    if (entity.kind === "building") {
+      return "1 Building";
+    }
+  }
+  return `${selected.length} Selected`;
+}
+
+function getEntityBadge(entity: Entity): string {
+  if (entity.kind === "unit") {
+    switch (entity.unitType) {
+      case "worker":
+        return "WK";
+      case "shrewScout":
+        return "SC";
+      case "shieldbearer":
+        return "SH";
+      case "badgerChampion":
+        return "BC";
+      case "ramCart":
+        return "RM";
+      default:
+        return UNIT_DEFINITIONS[entity.unitType].label.slice(0, 2).toUpperCase();
+    }
+  }
+  if (entity.kind === "building") {
+    switch (entity.buildingType) {
+      case "abbeyHall":
+        return "AH";
+      case "longPatrolLodge":
+        return "LP";
+      default:
+        return BUILDING_DEFINITIONS[entity.buildingType].label.slice(0, 2).toUpperCase();
+    }
+  }
+  return formatLabel(entity.resourceType).slice(0, 2).toUpperCase();
+}
+
+function clamp(value: number, minimum: number, maximum: number): number {
+  return Math.min(maximum, Math.max(minimum, value));
+}
+
+function getPlayerQueuedUnits(session: GameSession): number {
+  return Object.values(session.getWorld().entities)
+    .filter((entity): entity is BuildingEntity => entity.kind === "building" && entity.playerId === "player")
+    .reduce((total, entity) => total + entity.queue.filter((item) => item.kind === "unit").length, 0);
+}
+
 interface HudOptions {
   settings: GameSettings;
   onSaveAndExit: () => Promise<unknown> | void;
   onSettingsChange: (settings: GameSettings) => void;
   onReturnToMenu: () => Promise<unknown> | void;
   onStartNewMatch: () => Promise<unknown> | void;
+  onNavigateMinimap: (tile: TilePoint) => void;
+  getVisibleTileBounds: () => VisibleBounds | undefined;
 }
 
 export class Hud {
@@ -52,11 +193,17 @@ export class Hud {
   private readonly options: HudOptions;
   private readonly minimapCanvas: HTMLCanvasElement;
   private readonly actionsHost: HTMLDivElement;
+  private readonly queueHost: HTMLDivElement;
+  private readonly queueSummaryHost: HTMLSpanElement;
   private readonly selectionHost: HTMLDivElement;
+  private readonly selectionRosterHost: HTMLDivElement;
+  private readonly selectionCountLabel: HTMLSpanElement;
   private readonly hintHost: HTMLParagraphElement;
   private readonly resourceValues: Record<string, HTMLSpanElement>;
   private readonly ageLabel: HTMLSpanElement;
   private readonly commandLabel: HTMLSpanElement;
+  private readonly clockLabel: HTMLSpanElement;
+  private readonly economySummaryLabel: HTMLSpanElement;
   private readonly outcomeLabel: HTMLParagraphElement;
   private readonly pauseButton: HTMLButtonElement;
   private readonly gridButton: HTMLButtonElement;
@@ -64,6 +211,7 @@ export class Hud {
   private readonly saveExitButton: HTMLButtonElement;
   private readonly overlay: HTMLDivElement;
   private readonly handleKeydownBound: (event: KeyboardEvent) => void;
+  private readonly handleMinimapClickBound: (event: MouseEvent) => void;
   private readonly unsubscribe: () => void;
   private settings: GameSettings;
   private lastActionSignature = "";
@@ -75,17 +223,31 @@ export class Hud {
     this.settings = options.settings;
     this.root.className = "hud";
     this.root.innerHTML = `
-      <section class="hud-bar" data-testid="hud">
-        <div class="resource-strip">
-          <span>Food <strong data-testid="food-value">0</strong></span>
-          <span>Timber <strong data-testid="timber-value">0</strong></span>
-          <span>Stone <strong data-testid="stone-value">0</strong></span>
-          <span>Iron <strong data-testid="iron-value">0</strong></span>
-          <span>Pop <strong data-testid="population-value">0/0</strong></span>
+      <section class="hud-topbar" data-testid="hud">
+        <div class="rts-panel resource-strip">
+          <div class="resource-cell resource-food"><span class="resource-glyph">F</span><span class="resource-name">Food</span><strong data-testid="food-value">0</strong></div>
+          <div class="resource-cell resource-timber"><span class="resource-glyph">W</span><span class="resource-name">Wood</span><strong data-testid="timber-value">0</strong></div>
+          <div class="resource-cell resource-stone"><span class="resource-glyph">S</span><span class="resource-name">Stone</span><strong data-testid="stone-value">0</strong></div>
+          <div class="resource-cell resource-iron"><span class="resource-glyph">I</span><span class="resource-name">Iron</span><strong data-testid="iron-value">0</strong></div>
+          <div class="resource-cell resource-pop"><span class="resource-glyph">P</span><span class="resource-name">Pop</span><strong data-testid="population-value">0/0</strong></div>
         </div>
-        <div class="meta-strip">
-          <span data-testid="age-label">Settlement Age</span>
-          <span data-testid="command-mode">Context</span>
+        <div class="rts-panel meta-ribbon">
+          <div class="ribbon-section">
+            <span class="ribbon-label">Age</span>
+            <strong data-testid="age-label">Settlement Age</strong>
+          </div>
+          <div class="ribbon-section">
+            <span class="ribbon-label">Clock</span>
+            <strong data-testid="elapsed-time">00:00</strong>
+          </div>
+          <div class="ribbon-section ribbon-wide">
+            <span class="ribbon-label">Economy</span>
+            <strong data-testid="economy-summary">Workers 0 | Idle 0 | Army 0</strong>
+          </div>
+          <div class="ribbon-section ribbon-wide">
+            <span class="ribbon-label">Orders</span>
+            <strong data-testid="command-mode">Context</strong>
+          </div>
           <div class="meta-actions">
             <button class="secondary-button" data-testid="toggle-grid-button">Grid: Off</button>
             <button class="secondary-button" data-testid="toggle-motion-button">Motion: Full</button>
@@ -94,20 +256,34 @@ export class Hud {
           </div>
         </div>
       </section>
-      <section class="hud-columns">
-        <div class="panel selection-panel">
-          <div class="panel-heading">Selection</div>
-          <div data-testid="selection-panel"></div>
+      <section class="hud-dock">
+        <div class="panel dock-panel minimap-panel">
+          <div class="dock-header">
+            <div class="panel-heading">Mossflower Meadows</div>
+            <span class="dock-kicker">Minimap</span>
+          </div>
+          <canvas data-testid="minimap" width="180" height="180"></canvas>
+          <p class="minimap-instructions">Left click the minimap to shift the camera. Double-click units to grab the full group.</p>
+          <p class="hint" data-testid="outcome-label">Hold the field. Destroy the enemy host.</p>
+        </div>
+        <div class="panel dock-panel selection-panel">
+          <div class="dock-header">
+            <div class="panel-heading">Selected</div>
+            <span class="dock-kicker" data-testid="selection-count">No Selection</span>
+          </div>
+          <div class="selection-shell">
+            <div data-testid="selection-panel"></div>
+            <div class="selection-roster" data-testid="selection-roster"></div>
+          </div>
           <p class="hint" data-testid="build-hint">Select units with left click. Right click, Ctrl+click, or Alt+left-click to command.</p>
         </div>
-        <div class="panel action-panel">
-          <div class="panel-heading">Orders</div>
+        <div class="panel dock-panel action-panel">
+          <div class="dock-header">
+            <div class="panel-heading">Command Card</div>
+            <span class="dock-kicker" data-testid="queue-summary">Select a unit or building</span>
+          </div>
+          <div class="queue-panel" data-testid="queue-panel"></div>
           <div data-testid="action-panel"></div>
-        </div>
-        <div class="panel minimap-panel">
-          <div class="panel-heading">Mossflower</div>
-          <canvas data-testid="minimap" width="180" height="180"></canvas>
-          <p class="hint" data-testid="outcome-label">Hold the field. Destroy the enemy host.</p>
         </div>
       </section>
       <div class="hud-overlay" data-testid="hud-overlay" hidden></div>
@@ -115,9 +291,15 @@ export class Hud {
 
     this.minimapCanvas = this.root.querySelector("[data-testid='minimap']") as HTMLCanvasElement;
     this.actionsHost = this.root.querySelector("[data-testid='action-panel']") as HTMLDivElement;
+    this.queueHost = this.root.querySelector("[data-testid='queue-panel']") as HTMLDivElement;
+    this.queueSummaryHost = this.root.querySelector("[data-testid='queue-summary']") as HTMLSpanElement;
     this.selectionHost = this.root.querySelector("[data-testid='selection-panel']") as HTMLDivElement;
+    this.selectionRosterHost = this.root.querySelector("[data-testid='selection-roster']") as HTMLDivElement;
+    this.selectionCountLabel = this.root.querySelector("[data-testid='selection-count']") as HTMLSpanElement;
     this.hintHost = this.root.querySelector("[data-testid='build-hint']") as HTMLParagraphElement;
     this.ageLabel = this.root.querySelector("[data-testid='age-label']") as HTMLSpanElement;
+    this.clockLabel = this.root.querySelector("[data-testid='elapsed-time']") as HTMLSpanElement;
+    this.economySummaryLabel = this.root.querySelector("[data-testid='economy-summary']") as HTMLSpanElement;
     this.commandLabel = this.root.querySelector("[data-testid='command-mode']") as HTMLSpanElement;
     this.outcomeLabel = this.root.querySelector("[data-testid='outcome-label']") as HTMLParagraphElement;
     this.resourceValues = {
@@ -155,13 +337,17 @@ export class Hud {
     });
 
     this.handleKeydownBound = (event: KeyboardEvent) => this.handleKeydown(event);
+    this.handleMinimapClickBound = (event: MouseEvent) => this.handleMinimapClick(event);
     window.addEventListener("keydown", this.handleKeydownBound);
+    this.minimapCanvas.addEventListener("click", this.handleMinimapClickBound);
+
     this.unsubscribe = this.session.subscribe(() => this.render());
     this.render();
   }
 
   public destroy(): void {
     window.removeEventListener("keydown", this.handleKeydownBound);
+    this.minimapCanvas.removeEventListener("click", this.handleMinimapClickBound);
     this.unsubscribe();
   }
 
@@ -180,11 +366,9 @@ export class Hud {
     this.resourceValues.iron.textContent = `${Math.round(player.resources.iron)}`;
     this.resourceValues.population.textContent = `${player.populationUsed}/${player.populationCap}`;
     this.ageLabel.textContent = formatAge(player.age);
-    this.commandLabel.textContent = sessionState.buildMode
-      ? `Build: ${BUILDING_DEFINITIONS[sessionState.buildMode].label}`
-      : sessionState.commandMode
-        ? `${formatLabel(sessionState.commandMode)} Mode`
-        : "Context";
+    this.clockLabel.textContent = formatClock(world.elapsedMs);
+    this.economySummaryLabel.textContent = this.getEconomySummary();
+    this.commandLabel.textContent = this.getCommandLabel();
     this.outcomeLabel.textContent =
       world.outcome === "playerVictory"
         ? "Victory in Mossflower."
@@ -198,61 +382,173 @@ export class Hud {
     this.renderOverlay(world.outcome, sessionState.paused, player.age, world.elapsedMs);
 
     const selected = this.session.getSelectedEntities();
-    const actionSignature = this.getActionSignature(selected, player.age);
+    this.selectionCountLabel.textContent = getSelectionCountLabel(selected);
     this.selectionHost.innerHTML = "";
+    this.selectionRosterHost.innerHTML = "";
+
     if (selected.length === 0) {
-      this.selectionHost.innerHTML = "<p class='hint'>No current selection.</p>";
+      this.selectionHost.innerHTML = `
+        <div class="selection-empty">
+          <div class="selection-title">Abbey Command</div>
+          <p class="hint">Open with workers, add dormitories early, and keep barracks and range producing once you hit Abbey Age.</p>
+        </div>
+      `;
       this.hintHost.textContent = sessionState.buildMode
-        ? `Build mode: ${BUILDING_DEFINITIONS[sessionState.buildMode as BuildingType].label}. Left click to place, or use right click/Ctrl+click.`
+        ? `Build mode armed for ${BUILDING_DEFINITIONS[sessionState.buildMode].label}. Left click to place.`
         : sessionState.commandMode
-          ? `${formatLabel(sessionState.commandMode)} mode armed. Left click to issue that order.`
+          ? `${this.getCommandLabel()} armed. Left click the battlefield to issue the order.`
           : "Select units with left click. Right click, Ctrl+click, or Alt+left-click to command.";
-      this.renderActionsPanel(actionSignature, () => {
-        this.actionsHost.innerHTML = "";
-      });
     } else if (selected.length === 1) {
-      const entity = selected[0];
-      this.selectionHost.append(this.renderSelectionCard(entity));
-      this.renderActionsPanel(actionSignature, () => {
-        this.actionsHost.innerHTML = "";
-        this.renderActions(entity);
-      });
+      this.selectionHost.append(this.renderSelectionCard(selected[0]));
+      this.hintHost.textContent = this.getContextHint(selected);
     } else {
       const wrapper = document.createElement("div");
       wrapper.className = "selection-summary";
-      wrapper.innerHTML = `<div class="selection-title">${selected.length} units selected</div>`;
+      wrapper.innerHTML = `
+        <div class="selection-title">${selected.length} units ready</div>
+        <div class="selection-meta">Double-click to grab a whole troop type. Click a roster chip below to filter the current group.</div>
+      `;
       this.selectionHost.append(wrapper);
-      this.renderActionsPanel(actionSignature, () => {
-        this.actionsHost.innerHTML = "";
-        this.renderGroupActions(selected.filter((entity): entity is UnitEntity => entity.kind === "unit"));
-      });
-      this.hintHost.textContent = "Group selected. Use Move, Attack, or Gather modes for left-click orders.";
+      this.hintHost.textContent = this.getContextHint(selected);
+      this.renderSelectionRoster(selected);
     }
 
+    const actions = this.getAvailableActions(selected);
+    const actionSignature = this.getActionSignature(selected, player, actions);
+    this.renderActionsPanel(actionSignature, actions);
+    this.renderQueuePanel(selected);
     this.drawMinimap();
   }
 
-  private renderActionsPanel(signature: string, render: () => void): void {
+  private getCommandLabel(): string {
+    const sessionState = this.session.getSessionState();
+    if (sessionState.buildMode) {
+      return `Build: ${BUILDING_DEFINITIONS[sessionState.buildMode].label}`;
+    }
+    switch (sessionState.commandMode) {
+      case "move":
+        return "Move Mode";
+      case "gather":
+        return "Gather Mode";
+      case "attack":
+        return "Patrol Mode";
+      case "rally":
+        return "Rally Mode";
+      default:
+        return "Context";
+    }
+  }
+
+  private getEconomySummary(): string {
+    const entities = Object.values(this.session.getWorld().entities)
+      .filter((entity): entity is UnitEntity => entity.kind === "unit" && entity.playerId === "player");
+    const workers = entities.filter((entity) => UNIT_DEFINITIONS[entity.unitType].tags.includes("worker"));
+    const resourceCounts = {
+      food: 0,
+      timber: 0,
+      stone: 0,
+      iron: 0,
+    };
+    let idleWorkers = 0;
+
+    for (const worker of workers) {
+      if (worker.order.type === "idle") {
+        idleWorkers += 1;
+        continue;
+      }
+      if (worker.order.type === "gather") {
+        const target = this.session.getWorld().entities[worker.order.targetId];
+        if (target?.kind === "resource") {
+          resourceCounts[target.resourceType] += 1;
+        } else {
+          idleWorkers += 1;
+        }
+      }
+    }
+
+    return [
+      `Workers ${workers.length}`,
+      `Idle ${idleWorkers}`,
+      `Food ${resourceCounts.food}`,
+      `Wood ${resourceCounts.timber}`,
+      `Stone ${resourceCounts.stone}`,
+      `Iron ${resourceCounts.iron}`,
+      `Army ${entities.length - workers.length}`,
+    ].join(" | ");
+  }
+
+  private getContextHint(selected: Entity[]): string {
+    const sessionState = this.session.getSessionState();
+    if (sessionState.buildMode) {
+      return `Build mode: ${BUILDING_DEFINITIONS[sessionState.buildMode].label}. Left click to place, Escape to cancel.`;
+    }
+    if (sessionState.commandMode) {
+      return `${this.getCommandLabel()} armed. Left click the battlefield to place that order.`;
+    }
+    if (selected.length > 1) {
+      const workerPresent = selected.some((entity) => entity.kind === "unit" && UNIT_DEFINITIONS[entity.unitType].tags.includes("worker"));
+      return workerPresent
+        ? "Mixed group selected. Command cards include movement plus worker construction."
+        : "Troop group selected. Use the command card or right click to move, patrol, and stop.";
+    }
+    const single = selected[0];
+    if (single.kind === "unit") {
+      return UNIT_DEFINITIONS[single.unitType].tags.includes("worker")
+        ? "Workers can build from the command card and gather with right click or the Gather card."
+        : "Troops respond best to right click context orders or Patrol from the command card.";
+    }
+    return "Production buildings show queue progress here. Use the command card to train, research, and set rally points.";
+  }
+
+  private renderActionsPanel(signature: string, actions: ActionDescriptor[]): void {
     if (signature === this.lastActionSignature) {
       return;
     }
-    render();
+
+    this.actionsHost.innerHTML = "";
+    this.actionsHost.className = "command-grid";
+    if (actions.length === 0) {
+      this.actionsHost.innerHTML = `
+        <div class="action-empty">
+          <strong>Command Card</strong>
+          <span>Select a worker, troop, or building to open classic RTS actions and hotkeys.</span>
+        </div>
+      `;
+      this.lastActionSignature = signature;
+      return;
+    }
+
+    for (const action of actions) {
+      this.actionsHost.append(this.createActionButton(action));
+    }
     this.lastActionSignature = signature;
   }
 
-  private getActionSignature(selected: Entity[], age: Age): string {
-    if (selected.length === 0) {
-      return "none";
-    }
-    return selected.map((entity) => {
+  private getActionSignature(selected: Entity[], player: ReturnType<GameSession["getWorld"]>["players"]["player"], actions: ActionDescriptor[]): string {
+    const selectionSignature = selected.map((entity) => {
       if (entity.kind === "unit") {
-        return `unit:${entity.id}:${entity.unitType}`;
+        return `u:${entity.id}:${entity.unitType}`;
       }
       if (entity.kind === "building") {
-        return `building:${entity.id}:${entity.buildingType}:${entity.completed}:${age}`;
+        return `b:${entity.id}:${entity.buildingType}:${entity.completed}:${entity.queue.map((item) => item.id).join(",")}`;
       }
-      return `resource:${entity.id}`;
+      return `r:${entity.id}`;
     }).join("|");
+    const actionSignature = actions.map((action) => `${action.testId}:${action.disabled ? "0" : "1"}`).join("|");
+    const researched = Object.keys(player.research)
+      .filter((researchId) => player.research[researchId as ResearchId])
+      .join(",");
+    return [
+      selectionSignature || "none",
+      actionSignature || "none",
+      player.age,
+      Math.floor(player.resources.food),
+      Math.floor(player.resources.timber),
+      Math.floor(player.resources.stone),
+      Math.floor(player.resources.iron),
+      `${player.populationUsed}/${player.populationCap}`,
+      researched,
+    ].join("|");
   }
 
   private renderOverlay(outcome: "ongoing" | "playerVictory" | "playerDefeat", paused: boolean, age: Age, elapsedMs: number): void {
@@ -320,30 +616,89 @@ export class Hud {
   private renderSelectionCard(entity: Entity): HTMLDivElement {
     const card = document.createElement("div");
     card.className = "selection-card";
+
     if (entity.kind === "unit") {
       const definition = UNIT_DEFINITIONS[entity.unitType];
+      const cargo = entity.carry ? `${formatLabel(entity.carry.type)} ${Math.round(entity.carry.amount)}` : "None";
       card.innerHTML = `
-        <div class="selection-title" data-testid="selection-name">${definition.label}</div>
-        <div class="selection-meta">${formatLabel(entity.order.type)}</div>
-        <div class="selection-health">${Math.round(entity.hp)}/${entity.maxHp} hp</div>
+        <div class="selection-hero">
+          <div class="portrait-badge">${getEntityBadge(entity)}</div>
+          <div>
+            <div class="selection-title" data-testid="selection-name">${definition.label}</div>
+            <div class="selection-meta">${formatLabel(entity.order.type)}</div>
+          </div>
+        </div>
+        <div class="selection-detail-grid">
+          <div><span>HP</span><strong>${Math.round(entity.hp)}/${entity.maxHp}</strong></div>
+          <div><span>Attack</span><strong>${definition.attackDamage}</strong></div>
+          <div><span>Armor</span><strong>${definition.armor ?? 0}</strong></div>
+          <div><span>Speed</span><strong>${definition.speed.toFixed(2)}</strong></div>
+        </div>
+        <div class="selection-health">Carry: ${cargo}</div>
       `;
       return card;
     }
+
     if (entity.kind === "building") {
       const definition = BUILDING_DEFINITIONS[entity.buildingType];
+      const footprint = `${definition.footprint.x}x${definition.footprint.y}`;
+      const output = definition.production?.length ? `${definition.production.length} options` : "No queue";
       card.innerHTML = `
-        <div class="selection-title" data-testid="selection-name">${definition.label}</div>
-        <div class="selection-meta">${entity.completed ? "Operational" : "Under construction"}</div>
-        <div class="selection-health">${Math.round(entity.hp)}/${entity.maxHp} hp</div>
+        <div class="selection-hero">
+          <div class="portrait-badge portrait-building">${getEntityBadge(entity)}</div>
+          <div>
+            <div class="selection-title" data-testid="selection-name">${definition.label}</div>
+            <div class="selection-meta">${entity.completed ? "Operational" : "Under construction"}</div>
+          </div>
+        </div>
+        <div class="selection-detail-grid">
+          <div><span>HP</span><strong>${Math.round(entity.hp)}/${entity.maxHp}</strong></div>
+          <div><span>Size</span><strong>${footprint}</strong></div>
+          <div><span>Range</span><strong>${definition.attackRange ? definition.attackRange.toFixed(1) : "-"}</strong></div>
+          <div><span>Output</span><strong>${output}</strong></div>
+        </div>
       `;
       card.append(this.renderBuildingWorkState(entity));
       return card;
     }
+
     card.innerHTML = `
-      <div class="selection-title" data-testid="selection-name">${formatLabel(entity.resourceType)}</div>
-      <div class="selection-meta">${entity.amount}/${entity.maxAmount} remaining</div>
+      <div class="selection-hero">
+        <div class="portrait-badge">${getEntityBadge(entity)}</div>
+        <div>
+          <div class="selection-title" data-testid="selection-name">${formatLabel(entity.resourceType)}</div>
+          <div class="selection-meta">Resource</div>
+        </div>
+      </div>
+      <div class="selection-health">${entity.amount}/${entity.maxAmount} remaining</div>
     `;
     return card;
+  }
+
+  private renderSelectionRoster(selected: Entity[]): void {
+    const groups = new Map<string, { label: string; ids: string[] }>();
+    for (const entity of selected) {
+      const key = entity.kind === "unit" ? `unit:${entity.unitType}` : entity.kind === "building" ? `building:${entity.buildingType}` : `resource:${entity.resourceType}`;
+      const label = entity.kind === "unit"
+        ? UNIT_DEFINITIONS[entity.unitType].label
+        : entity.kind === "building"
+          ? BUILDING_DEFINITIONS[entity.buildingType].label
+          : formatLabel(entity.resourceType);
+      if (!groups.has(key)) {
+        groups.set(key, { label, ids: [] });
+      }
+      groups.get(key)?.ids.push(entity.id);
+    }
+
+    for (const group of groups.values()) {
+      const button = document.createElement("button");
+      button.className = "selection-roster-button";
+      button.textContent = `${group.ids.length}x ${group.label}`;
+      button.addEventListener("click", () => {
+        this.session.setSelection(group.ids);
+      });
+      this.selectionRosterHost.append(button);
+    }
   }
 
   private renderBuildingWorkState(building: BuildingEntity): HTMLDivElement {
@@ -421,131 +776,325 @@ export class Hud {
     return wrapper;
   }
 
-  private renderActions(entity: Entity): void {
-    if (entity.kind === "unit") {
-      this.actionsHost.append(
-        this.createButton("Move", "action-mode-move", () => this.session.setCommandMode("move")),
-        this.createButton("Gather", "action-mode-gather", () => this.session.setCommandMode("gather")),
-        this.createButton("Attack", "action-mode-attack", () => this.session.setCommandMode("attack")),
-      );
-      if (UNIT_DEFINITIONS[entity.unitType].tags.includes("worker")) {
-        const buildingOptions: BuildingType[] = [
-          "dormitory",
-          "storehouse",
-          "granary",
-          "barracks",
-          "range",
-          "blacksmith",
-          "longPatrolLodge",
-          "tower",
-          "wall",
-          "gate",
-          "workshop",
-        ];
-        this.actionsHost.append(
-          ...buildingOptions.map((buildingType) =>
-            this.createButton(
-              BUILDING_DEFINITIONS[buildingType].label,
-              `action-build-${buildingType}`,
-              () => this.session.setBuildMode(buildingType),
-            ),
-          ),
-        );
-      } else {
-        this.actionsHost.append(
-          this.createButton("Stop", "action-stop", () => {
-            this.session.issueCommand({ type: "stop", unitIds: [entity.id] });
-          }),
-        );
+  private renderQueuePanel(selected: Entity[]): void {
+    this.queueHost.innerHTML = "";
+
+    if (selected.length !== 1 || selected[0].kind !== "building") {
+      this.queueSummaryHost.textContent = selected.length > 1 ? `${selected.length} units in the group` : "Select a production building";
+      const note = document.createElement("div");
+      note.className = "queue-entry";
+      note.innerHTML = `
+        <div class="queue-entry-title">Command Tips</div>
+        <div class="queue-entry-meta">Double-click troops for same-type selection. Click the minimap to snap the camera. Use QWER / ASDF / ZXCV on the command card.</div>
+      `;
+      this.queueHost.append(note);
+      return;
+    }
+
+    const building = selected[0];
+    this.queueSummaryHost.textContent = building.completed
+      ? (building.queue.length > 0 ? `${building.queue.length} queued` : "Idle")
+      : "Construction";
+
+    if (!building.completed) {
+      this.queueHost.append(this.createProgressBlock(
+        "Construction",
+        `${Math.round((building.buildProgressMs / Math.max(1, BUILDING_DEFINITIONS[building.buildingType].buildTimeMs)) * 100)}%`,
+        building.buildProgressMs / Math.max(1, BUILDING_DEFINITIONS[building.buildingType].buildTimeMs),
+        `${formatDuration(BUILDING_DEFINITIONS[building.buildingType].buildTimeMs - building.buildProgressMs)} remaining`,
+      ));
+      return;
+    }
+
+    if (building.queue.length === 0) {
+      const note = document.createElement("div");
+      note.className = "queue-entry";
+      note.innerHTML = `
+        <div class="queue-entry-title">Queue Empty</div>
+        <div class="queue-entry-meta">Set a rally point or start training from the command card. Current rally: ${building.rallyPoint.x}, ${building.rallyPoint.y}</div>
+      `;
+      this.queueHost.append(note);
+      return;
+    }
+
+    building.queue.forEach((item, index) => {
+      const entry = document.createElement("div");
+      entry.className = `queue-entry${index === 0 ? " active" : ""}`;
+      const totalMs = Math.max(1, getQueuedItemTotalMs(item));
+      const progress = Math.min(1, Math.max(0, (totalMs - item.remainingMs) / totalMs));
+      entry.innerHTML = `
+        <div class="queue-entry-title">${index === 0 ? "Active" : `Queued ${index}`}: ${getQueuedItemLabel(item)}</div>
+        <div class="queue-entry-meta">${item.kind === "research" ? "Research" : item.kind === "age" ? "Age Up" : "Training"} · ${formatDuration(item.remainingMs)} remaining</div>
+      `;
+      if (index === 0) {
+        const track = document.createElement("div");
+        track.className = "progress-track";
+        track.innerHTML = `<div class="progress-fill" style="width: ${Math.max(4, progress * 100)}%"></div>`;
+        entry.append(track);
       }
-      return;
-    }
-
-    if (entity.kind !== "building" || !entity.completed) {
-      return;
-    }
-
-    this.actionsHost.append(this.createButton("Set Rally", "action-mode-rally", () => this.session.setCommandMode("rally")));
-
-    if (entity.buildingType === "abbeyHall") {
-      this.actionsHost.append(
-        this.createTrainButton(entity, "worker"),
-        this.createTrainButton(entity, "shrewScout"),
-        this.createButton("Advance to Abbey Age", "action-age-abbey", () => {
-          this.session.issueCommand({ type: "ageUp", buildingId: entity.id, nextAge: "abbey" });
-        }),
-        this.createButton("Advance to Warhost Age", "action-age-warhost", () => {
-          this.session.issueCommand({ type: "ageUp", buildingId: entity.id, nextAge: "warhost" });
-        }),
-      );
-    }
-
-    if (entity.buildingType === "barracks") {
-      this.actionsHost.append(this.createTrainButton(entity, "militia"), this.createTrainButton(entity, "shieldbearer"));
-    }
-    if (entity.buildingType === "range") {
-      this.actionsHost.append(
-        this.createTrainButton(entity, "slinger"),
-        this.createTrainButton(entity, "archer"),
-        this.createTrainButton(entity, "otterSkirmisher"),
-      );
-    }
-    if (entity.buildingType === "longPatrolLodge") {
-      this.actionsHost.append(this.createTrainButton(entity, "hareRunner"), this.createTrainButton(entity, "badgerChampion"));
-    }
-    if (entity.buildingType === "workshop") {
-      this.actionsHost.append(this.createTrainButton(entity, "ramCart"));
-    }
-    if (entity.buildingType === "granary") {
-      this.actionsHost.append(this.createResearchButton(entity, "woodcraft"));
-    }
-    if (entity.buildingType === "blacksmith") {
-      const researchIds: ResearchId[] = ["stoneMasonry", "ironforging", "leatherwork", "towerGuard", "hareDrills"];
-      this.actionsHost.append(...researchIds.map((researchId) => this.createResearchButton(entity, researchId)));
-    }
+      this.queueHost.append(entry);
+    });
   }
 
-  private renderGroupActions(units: UnitEntity[]): void {
+  private getAvailableActions(selected: Entity[]): ActionDescriptor[] {
+    const player = this.session.getWorld().players.player;
+    const actions: ActionDescriptor[] = [];
+
+    if (selected.length === 0) {
+      return actions;
+    }
+
+    if (selected.length === 1 && selected[0].kind === "building") {
+      this.appendBuildingActions(actions, selected[0], player);
+      return this.assignGridHotkeys(actions);
+    }
+
+    const units = selected.filter((entity): entity is UnitEntity => entity.kind === "unit");
     if (units.length === 0) {
-      this.actionsHost.innerHTML = "<p class='hint'>No actions available.</p>";
+      return actions;
+    }
+
+    const hasWorkers = units.some((unit) => UNIT_DEFINITIONS[unit.unitType].tags.includes("worker"));
+    actions.push(
+      {
+        label: "Move",
+        testId: units.length === 1 ? "action-mode-move" : "action-group-move",
+        action: () => this.session.setCommandMode("move"),
+        detail: "Ground order",
+        tone: "command",
+      },
+      {
+        label: "Gather",
+        testId: units.length === 1 ? "action-mode-gather" : "action-group-gather",
+        action: () => this.session.setCommandMode("gather"),
+        detail: hasWorkers ? "Resource order" : "Requires worker",
+        disabled: !hasWorkers,
+        disabledReason: !hasWorkers ? "Only workers can gather resources." : undefined,
+        tone: "command",
+      },
+      {
+        label: "Patrol",
+        testId: units.length === 1 ? "action-mode-attack" : "action-group-attack",
+        action: () => this.session.setCommandMode("attack"),
+        detail: "Attack move",
+        tone: "command",
+      },
+      {
+        label: "Stop",
+        testId: units.length === 1 ? "action-stop" : "action-group-stop",
+        action: () => {
+          this.session.issueCommand({ type: "stop", unitIds: units.map((unit) => unit.id) });
+        },
+        detail: "Cancel orders",
+        tone: "command",
+      },
+    );
+
+    if (hasWorkers) {
+      const buildingOptions: BuildingType[] = [
+        "dormitory",
+        "storehouse",
+        "granary",
+        "barracks",
+        "range",
+        "blacksmith",
+        "tower",
+        "wall",
+        "gate",
+        "longPatrolLodge",
+        "workshop",
+      ];
+      for (const buildingType of buildingOptions) {
+        const definition = BUILDING_DEFINITIONS[buildingType];
+        const unlocked = isAgeUnlocked(player.age, definition.age);
+        const affordable = bagHasCost(player.resources, definition.cost);
+        actions.push({
+          label: definition.label,
+          testId: `action-build-${buildingType}`,
+          action: () => this.session.setBuildMode(buildingType),
+          detail: formatDuration(definition.buildTimeMs),
+          cost: definition.cost,
+          disabled: !unlocked || !affordable,
+          disabledReason: !unlocked ? `${definition.label} unlocks in ${formatAge(definition.age)}.` : !affordable ? "Not enough resources." : undefined,
+          tone: "build",
+        });
+      }
+    }
+
+    return this.assignGridHotkeys(actions);
+  }
+
+  private appendBuildingActions(
+    actions: ActionDescriptor[],
+    building: BuildingEntity,
+    player: ReturnType<GameSession["getWorld"]>["players"]["player"],
+  ): void {
+    if (!building.completed) {
       return;
     }
-    this.actionsHost.append(
-      this.createButton("Move", "action-group-move", () => this.session.setCommandMode("move")),
-      this.createButton("Attack", "action-group-attack", () => this.session.setCommandMode("attack")),
-      this.createButton("Gather", "action-group-gather", () => this.session.setCommandMode("gather")),
-    );
-    const workerPresent = units.some((unit) => UNIT_DEFINITIONS[unit.unitType].tags.includes("worker"));
-    if (workerPresent) {
-      this.actionsHost.append(this.createButton("Build Dormitory", "action-build-dormitory", () => this.session.setBuildMode("dormitory")));
-      this.actionsHost.append(this.createButton("Build Barracks", "action-build-barracks", () => this.session.setBuildMode("barracks")));
-      this.actionsHost.append(this.createButton("Build Tower", "action-build-tower", () => this.session.setBuildMode("tower")));
+
+    actions.push({
+      label: "Set Rally",
+      testId: "action-mode-rally",
+      action: () => this.session.setCommandMode("rally"),
+      detail: `${building.rallyPoint.x}, ${building.rallyPoint.y}`,
+      tone: "command",
+    });
+
+    if (building.buildingType === "abbeyHall") {
+      actions.push(
+        this.createTrainAction(building, player, "worker"),
+        this.createTrainAction(building, player, "shrewScout"),
+        this.createAgeAction(building, player, "abbey"),
+        this.createAgeAction(building, player, "warhost"),
+      );
     }
-    this.actionsHost.append(
-      this.createButton("Stop", "action-group-stop", () => {
-        this.session.issueCommand({ type: "stop", unitIds: units.map((unit) => unit.id) });
-      }),
-    );
+
+    if (building.buildingType === "barracks") {
+      actions.push(this.createTrainAction(building, player, "militia"), this.createTrainAction(building, player, "shieldbearer"));
+    }
+    if (building.buildingType === "range") {
+      actions.push(
+        this.createTrainAction(building, player, "slinger"),
+        this.createTrainAction(building, player, "archer"),
+        this.createTrainAction(building, player, "otterSkirmisher"),
+      );
+    }
+    if (building.buildingType === "longPatrolLodge") {
+      actions.push(this.createTrainAction(building, player, "hareRunner"), this.createTrainAction(building, player, "badgerChampion"));
+    }
+    if (building.buildingType === "workshop") {
+      actions.push(this.createTrainAction(building, player, "ramCart"));
+    }
+    if (building.buildingType === "granary") {
+      actions.push(this.createResearchAction(building, player, "woodcraft"));
+    }
+    if (building.buildingType === "blacksmith") {
+      const researchIds: ResearchId[] = ["stoneMasonry", "ironforging", "leatherwork", "towerGuard", "hareDrills"];
+      actions.push(...researchIds.map((researchId) => this.createResearchAction(building, player, researchId)));
+    }
   }
 
-  private createTrainButton(building: BuildingEntity, unitType: UnitType): HTMLButtonElement {
-    return this.createButton(UNIT_DEFINITIONS[unitType].label, `action-train-${unitType}`, () => {
-      this.session.issueCommand({ type: "train", buildingId: building.id, unitType });
+  private createTrainAction(
+    building: BuildingEntity,
+    player: ReturnType<GameSession["getWorld"]>["players"]["player"],
+    unitType: UnitType,
+  ): ActionDescriptor {
+    const definition = UNIT_DEFINITIONS[unitType];
+    const unlocked = isAgeUnlocked(player.age, definition.age);
+    const affordable = bagHasCost(player.resources, definition.cost);
+    const queuedUnits = getPlayerQueuedUnits(this.session);
+    const popAvailable = player.populationUsed + queuedUnits < player.populationCap;
+    return {
+      label: definition.label,
+      testId: `action-train-${unitType}`,
+      action: () => {
+        this.session.issueCommand({ type: "train", buildingId: building.id, unitType });
+      },
+      detail: formatDuration(definition.trainTimeMs),
+      cost: definition.cost,
+      disabled: !unlocked || !affordable || !popAvailable,
+      disabledReason: !unlocked
+        ? `${definition.label} requires ${formatAge(definition.age)}.`
+        : !affordable
+          ? "Not enough resources."
+          : !popAvailable
+            ? "Need more population room."
+            : undefined,
+      tone: "train",
+    };
+  }
+
+  private createResearchAction(
+    building: BuildingEntity,
+    player: ReturnType<GameSession["getWorld"]>["players"]["player"],
+    researchId: ResearchId,
+  ): ActionDescriptor {
+    const definition = RESEARCH_DEFINITIONS[researchId];
+    const alreadyQueued = building.queue.some((item) => item.id === researchId);
+    const unlocked = isAgeUnlocked(player.age, definition.age);
+    const affordable = bagHasCost(player.resources, definition.cost);
+    const complete = Boolean(player.research[researchId]);
+    return {
+      label: definition.label,
+      testId: `action-research-${researchId}`,
+      action: () => {
+        this.session.issueCommand({ type: "research", buildingId: building.id, researchId });
+      },
+      detail: formatDuration(definition.researchTimeMs),
+      cost: definition.cost,
+      disabled: complete || alreadyQueued || !unlocked || !affordable,
+      disabledReason: complete
+        ? "Already researched."
+        : alreadyQueued
+          ? "Already in queue."
+          : !unlocked
+            ? `Requires ${formatAge(definition.age)}.`
+            : !affordable
+              ? "Not enough resources."
+              : undefined,
+      tone: "research",
+    };
+  }
+
+  private createAgeAction(
+    building: BuildingEntity,
+    player: ReturnType<GameSession["getWorld"]>["players"]["player"],
+    nextAge: Age,
+  ): ActionDescriptor {
+    const researchId = nextAge === "abbey" ? "abbeyAge" : "warhostAge";
+    const definition = RESEARCH_DEFINITIONS[researchId];
+    const alreadyQueued = building.queue.some((item) => item.id === nextAge);
+    const alreadyAtAge = AGE_ORDER.indexOf(player.age) >= AGE_ORDER.indexOf(nextAge);
+    const affordable = bagHasCost(player.resources, definition.cost);
+    return {
+      label: nextAge === "abbey" ? "Advance to Abbey" : "Advance to Warhost",
+      testId: nextAge === "abbey" ? "action-age-abbey" : "action-age-warhost",
+      action: () => {
+        this.session.issueCommand({ type: "ageUp", buildingId: building.id, nextAge });
+      },
+      detail: formatDuration(definition.researchTimeMs),
+      cost: definition.cost,
+      disabled: alreadyAtAge || alreadyQueued || !affordable,
+      disabledReason: alreadyAtAge
+        ? `${formatAge(nextAge)} already reached.`
+        : alreadyQueued
+          ? "Age up already in queue."
+          : !affordable
+            ? "Not enough resources."
+            : undefined,
+      tone: "age",
+    };
+  }
+
+  private assignGridHotkeys(actions: ActionDescriptor[]): ActionDescriptor[] {
+    return actions.map((action, index) => {
+      const hotkey = ACTION_GRID_HOTKEYS[index];
+      return hotkey
+        ? { ...action, hotkeyLabel: hotkey.label, hotkeyCode: hotkey.code }
+        : action;
     });
   }
 
-  private createResearchButton(building: BuildingEntity, researchId: ResearchId): HTMLButtonElement {
-    return this.createButton(RESEARCH_DEFINITIONS[researchId].label, `action-research-${researchId}`, () => {
-      this.session.issueCommand({ type: "research", buildingId: building.id, researchId });
-    });
-  }
-
-  private createButton(label: string, testId: string, action: () => void): HTMLButtonElement {
+  private createActionButton(action: ActionDescriptor): HTMLButtonElement {
     const button = document.createElement("button");
-    button.className = "action-button";
-    button.textContent = label;
-    button.dataset.testid = testId;
-    button.addEventListener("click", action);
+    button.className = `action-button${action.tone ? ` action-${action.tone}` : ""}`;
+    button.dataset.testid = action.testId;
+    button.disabled = Boolean(action.disabled);
+    if (action.disabledReason) {
+      button.title = action.disabledReason;
+    }
+    button.innerHTML = `
+      <span class="action-card-top">
+        <span class="action-title">${action.label}</span>
+        ${action.hotkeyLabel ? `<span class="action-hotkey">${action.hotkeyLabel}</span>` : ""}
+      </span>
+      <span class="action-card-bottom">
+        <span class="action-detail">${action.detail ?? ""}</span>
+        <span class="action-cost">${formatCost(action.cost)}</span>
+      </span>
+    `;
+    button.addEventListener("click", action.action);
     return button;
   }
 
@@ -569,49 +1118,25 @@ export class Hud {
       this.session.setCommandMode(undefined);
       return;
     }
+
     const selected = this.session.getSelectedEntities();
-    if (selected.length === 0) {
-      return;
+    const actions = this.getAvailableActions(selected);
+    const hotkeyMatch = actions.find((action) => action.hotkeyCode === event.code && !action.disabled);
+    if (hotkeyMatch) {
+      event.preventDefault();
+      hotkeyMatch.action();
     }
-    const single = selected[0];
-    switch (event.code) {
-      case "KeyH":
-        if (selected.some((entity) => entity.kind === "unit" && UNIT_DEFINITIONS[entity.unitType].tags.includes("worker"))) {
-          this.session.setBuildMode("dormitory");
-        }
-        break;
-      case "KeyB":
-        if (selected.some((entity) => entity.kind === "unit" && UNIT_DEFINITIONS[entity.unitType].tags.includes("worker"))) {
-          this.session.setBuildMode("barracks");
-        }
-        break;
-      case "KeyM":
-        this.session.setCommandMode("move");
-        break;
-      case "KeyG":
-        this.session.setCommandMode("gather");
-        break;
-      case "KeyT":
-        this.session.setCommandMode("attack");
-        break;
-      case "KeyY":
-        if (single?.kind === "building") {
-          this.session.setCommandMode("rally");
-        }
-        break;
-      case "KeyQ":
-        if (single?.kind === "building" && single.buildingType === "abbeyHall") {
-          this.session.issueCommand({ type: "train", buildingId: single.id, unitType: "worker" });
-        }
-        break;
-      case "KeyR":
-        if (single?.kind === "building" && single.buildingType === "range") {
-          this.session.issueCommand({ type: "train", buildingId: single.id, unitType: "archer" });
-        }
-        break;
-      default:
-        break;
-    }
+  }
+
+  private handleMinimapClick(event: MouseEvent): void {
+    const rect = this.minimapCanvas.getBoundingClientRect();
+    const normalizedX = clamp((event.clientX - rect.left) / Math.max(1, rect.width), 0, 0.999);
+    const normalizedY = clamp((event.clientY - rect.top) / Math.max(1, rect.height), 0, 0.999);
+    const world = this.session.getWorld();
+    this.options.onNavigateMinimap({
+      x: Math.floor(normalizedX * world.map.width),
+      y: Math.floor(normalizedY * world.map.height),
+    });
   }
 
   private drawMinimap(): void {
@@ -628,10 +1153,11 @@ export class Hud {
         const index = tileIndex(world.map, { x, y });
         const explored = world.players.player.explored[index];
         const visible = world.players.player.visible[index];
-        context.fillStyle = !explored ? "#08100f" : visible ? "#456b4a" : "#22352b";
+        context.fillStyle = !explored ? "#08100f" : visible ? "#4c7750" : "#23372c";
         context.fillRect(x * tileWidth, y * tileHeight, tileWidth, tileHeight);
       }
     }
+
     for (const entity of Object.values(world.entities)) {
       if (entity.kind === "resource") {
         continue;
@@ -648,6 +1174,18 @@ export class Hud {
       const x = entity.kind === "unit" ? entity.position.x : entity.tile.x;
       const y = entity.kind === "unit" ? entity.position.y : entity.tile.y;
       context.fillRect(x * tileWidth, y * tileHeight, Math.max(2, tileWidth), Math.max(2, tileHeight));
+    }
+
+    const bounds = this.options.getVisibleTileBounds();
+    if (bounds) {
+      context.strokeStyle = "#f7e7b6";
+      context.lineWidth = 2;
+      context.strokeRect(
+        bounds.minX * tileWidth,
+        bounds.minY * tileHeight,
+        Math.max(tileWidth * 1.5, (bounds.maxX - bounds.minX + 1) * tileWidth),
+        Math.max(tileHeight * 1.5, (bounds.maxY - bounds.minY + 1) * tileHeight),
+      );
     }
   }
 }

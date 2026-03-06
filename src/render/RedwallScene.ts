@@ -122,6 +122,7 @@ export class RedwallScene extends Phaser.Scene {
   private pings: Ping[] = [];
   private isPanning = false;
   private lastPanPoint?: { x: number; y: number };
+  private lastSelectionClick?: { entityId: string; atMs: number };
 
   public constructor(session: GameSession, settings: GameSettings) {
     super("battlefield");
@@ -191,6 +192,7 @@ export class RedwallScene extends Phaser.Scene {
     });
 
     this.input.on("pointerup", (pointer: Phaser.Input.Pointer) => {
+      const domEvent = pointer.event as MouseEvent | undefined;
       if (this.isPanning) {
         this.isPanning = false;
         this.lastPanPoint = undefined;
@@ -216,8 +218,12 @@ export class RedwallScene extends Phaser.Scene {
       const distance = Math.abs(start.x - end.x) + Math.abs(start.y - end.y);
       if (distance > 1) {
         this.session.selectUnitsInBox(start, end);
+        this.lastSelectionClick = undefined;
       } else {
-        this.handleSelection(end);
+        this.handleSelection(pointer.worldX, pointer.worldY, end, {
+          append: Boolean(domEvent?.metaKey),
+          selectAllType: (domEvent?.detail ?? 0) >= 2,
+        });
       }
       this.clearDragSelection();
     });
@@ -256,10 +262,40 @@ export class RedwallScene extends Phaser.Scene {
   }
 
   public getCameraState() {
+    if (!this.cameras?.main) {
+      return undefined;
+    }
     return {
       scrollX: this.cameras.main.scrollX,
       scrollY: this.cameras.main.scrollY,
       zoom: this.cameras.main.zoom,
+    };
+  }
+
+  public focusCamera(tile: TilePoint): void {
+    if (!this.cameras?.main) {
+      return;
+    }
+    const point = this.tileToScreen({ x: tile.x + 0.5, y: tile.y + 0.5 });
+    this.cameras.main.centerOn(point.x, point.y + 12);
+  }
+
+  public getVisibleTileBounds() {
+    const camera = this.cameras?.main;
+    if (!camera) {
+      return undefined;
+    }
+    const corners = [
+      this.screenToTile(camera.scrollX, camera.scrollY),
+      this.screenToTile(camera.scrollX + camera.width / camera.zoom, camera.scrollY),
+      this.screenToTile(camera.scrollX, camera.scrollY + camera.height / camera.zoom),
+      this.screenToTile(camera.scrollX + camera.width / camera.zoom, camera.scrollY + camera.height / camera.zoom),
+    ];
+    return {
+      minX: Math.min(...corners.map((corner) => corner.x)),
+      minY: Math.min(...corners.map((corner) => corner.y)),
+      maxX: Math.max(...corners.map((corner) => corner.x)),
+      maxY: Math.max(...corners.map((corner) => corner.y)),
     };
   }
 
@@ -748,10 +784,28 @@ export class RedwallScene extends Phaser.Scene {
     graphics.fillCircle(point.x + 8, point.y + 4, 4);
   }
 
-  private handleSelection(tile: TilePoint): void {
-    const clicked = this.findPlayerEntityAtTile(tile);
+  private handleSelection(worldX: number, worldY: number, tile: TilePoint, options?: { append?: boolean; selectAllType?: boolean }): void {
+    const clicked = this.findPlayerEntityAtPoint(worldX, worldY, tile);
     if (!clicked) {
-      this.session.clearSelection();
+      if (!options?.append) {
+        this.session.clearSelection();
+      }
+      this.lastSelectionClick = undefined;
+      return;
+    }
+    const now = performance.now();
+    const repeatedClick = this.lastSelectionClick?.entityId === clicked.id
+      && now - this.lastSelectionClick.atMs < 360;
+    this.lastSelectionClick = {
+      entityId: clicked.id,
+      atMs: now,
+    };
+    if (clicked.kind === "unit" && (options?.selectAllType || repeatedClick)) {
+      this.session.selectAllUnitsOfType(clicked.unitType);
+      return;
+    }
+    if (options?.append) {
+      this.session.addSelection([clicked.id]);
       return;
     }
     this.session.setSelection([clicked.id]);
@@ -783,7 +837,7 @@ export class RedwallScene extends Phaser.Scene {
       this.pings.push({ tile, ttlMs: 1800 });
       return;
     }
-    const entity = this.findTargetAtTile(tile);
+    const entity = this.findTargetAtPoint(worldX, worldY, tile);
     if (entity?.kind === "resource") {
       this.session.issueCommand({ type: "gather", unitIds, targetId: entity.id });
     } else if ((entity?.kind === "unit" || entity?.kind === "building") && entity.playerId === "ai") {
@@ -798,7 +852,8 @@ export class RedwallScene extends Phaser.Scene {
     const sessionState = this.session.getSessionState();
     const selected = this.session.getSelectedEntities();
     const unitIds = selected.filter((entity) => entity.kind === "unit").map((entity) => entity.id);
-    const target = this.findTargetAtTile(tile);
+    const pointer = this.input.activePointer;
+    const target = this.findTargetAtPoint(pointer.worldX, pointer.worldY, tile);
 
     if (sessionState.buildMode && unitIds.length > 0) {
       this.session.issueCommand({
@@ -842,10 +897,14 @@ export class RedwallScene extends Phaser.Scene {
     }
   }
 
-  private findTargetAtTile(tile: TilePoint): Entity | undefined {
+  private findTargetAtPoint(worldX: number, worldY: number, tile: TilePoint): Entity | undefined {
+    const closestUnit = this.findClosestUnitAtWorldPoint(worldX, worldY, (unit) => unit.playerId === "ai");
+    if (closestUnit) {
+      return closestUnit;
+    }
     return Object.values(this.session.getWorld().entities).find((entity) => {
       if (entity.kind === "unit") {
-        return Math.abs(entity.position.x - (tile.x + 0.5)) < 0.9 && Math.abs(entity.position.y - (tile.y + 0.5)) < 0.9;
+        return false;
       }
       if (entity.kind === "building") {
         const definition = BUILDING_DEFINITIONS[entity.buildingType];
@@ -858,15 +917,17 @@ export class RedwallScene extends Phaser.Scene {
     });
   }
 
-  private findPlayerEntityAtTile(tile: TilePoint): Entity | undefined {
+  private findPlayerEntityAtPoint(worldX: number, worldY: number, tile: TilePoint): Entity | undefined {
+    const closestUnit = this.findClosestUnitAtWorldPoint(worldX, worldY, (unit) => unit.playerId === "player");
+    if (closestUnit) {
+      return closestUnit;
+    }
     return Object.values(this.session.getWorld().entities).find((entity) => {
       if (!this.isEntityVisibleToPlayer(this.session.getWorld(), entity)) {
         return false;
       }
       if (entity.kind === "unit") {
-        return entity.playerId === "player"
-          && Math.abs(entity.position.x - (tile.x + 0.5)) < 0.9
-          && Math.abs(entity.position.y - (tile.y + 0.5)) < 0.9;
+        return false;
       }
       if (entity.kind === "building") {
         if (entity.playerId !== "player") {
@@ -880,6 +941,25 @@ export class RedwallScene extends Phaser.Scene {
       }
       return false;
     });
+  }
+
+  private findClosestUnitAtWorldPoint(worldX: number, worldY: number, predicate: (unit: UnitEntity) => boolean): UnitEntity | undefined {
+    let bestUnit: UnitEntity | undefined;
+    let bestDistance = Number.POSITIVE_INFINITY;
+
+    for (const entity of Object.values(this.session.getWorld().entities)) {
+      if (entity.kind !== "unit" || !predicate(entity) || !this.isEntityVisibleToPlayer(this.session.getWorld(), entity)) {
+        continue;
+      }
+      const point = this.tileToScreen(entity.position);
+      const distance = Phaser.Math.Distance.Between(point.x, point.y + 6, worldX, worldY);
+      if (distance <= 34 && distance < bestDistance) {
+        bestUnit = entity;
+        bestDistance = distance;
+      }
+    }
+
+    return bestUnit;
   }
 
   private isEntityVisibleToPlayer(world: WorldState, entity: Entity): boolean {

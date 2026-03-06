@@ -1,6 +1,7 @@
 import { stringToSeed } from "../core/random";
 import { createSnapshot } from "../core/save";
 import type { BuildingType, Difficulty, GameCommand, GameConfig, Outcome, TilePoint, WorldState } from "../core/types";
+import type { UnitType } from "../core/types";
 import { BrowserStorage, type GameSettings, type ResumeMetadata } from "../persistence/storage";
 import type { GameSession } from "./GameSession";
 import type { RedwallScene } from "../render/RedwallScene";
@@ -16,8 +17,10 @@ type DebugApi = {
   advanceTicks: (count: number) => void;
   getSelectedIds: () => string[];
   setSelection: (ids: string[]) => void;
+  selectAllUnitsOfType: (unitType: UnitType) => void;
   issueCommand: (command: GameCommand) => boolean;
   setBuildMode: (buildingType?: BuildingType) => void;
+  focusCamera: (tile: TilePoint) => void;
   saveNow: () => Promise<boolean>;
   clearSave: () => Promise<void>;
   hasResume: () => boolean;
@@ -65,9 +68,15 @@ export class RedwallApp {
       setSelection: (ids: string[]) => {
         this.session?.setSelection(ids);
       },
+      selectAllUnitsOfType: (unitType: UnitType) => {
+        this.session?.selectAllUnitsOfType(unitType);
+      },
       issueCommand: (command: GameCommand) => this.session?.issueCommand(command) ?? false,
       setBuildMode: (buildingType?: BuildingType) => {
         this.session?.setBuildMode(buildingType);
+      },
+      focusCamera: (tile: TilePoint) => {
+        this.scene?.focusCamera(tile);
       },
       saveNow: async () => this.saveCurrentSession(),
       clearSave: async () => {
@@ -188,8 +197,10 @@ export class RedwallApp {
     this.root.innerHTML = `
       <div class="game-shell">
         <div class="battlefield-frame">
-          <div class="canvas-host" data-testid="game-shell"></div>
-          <div class="hud-host"></div>
+          <div class="canvas-shell">
+            <div class="canvas-host" data-testid="game-shell"></div>
+            <div class="hud-host"></div>
+          </div>
         </div>
       </div>
     `;
@@ -230,6 +241,8 @@ export class RedwallApp {
       onSettingsChange: (settings) => this.updateSettings(settings),
       onReturnToMenu: async () => this.returnToMenu(),
       onStartNewMatch: async () => this.startSkirmish(),
+      onNavigateMinimap: (tile) => this.scene?.focusCamera(tile),
+      getVisibleTileBounds: () => this.scene?.getVisibleTileBounds(),
     });
     this.autosaveTimer = this.session.getElapsedMs();
     this.session.subscribe(() => {

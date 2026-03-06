@@ -8,6 +8,7 @@ import type {
   Outcome,
   SessionState,
   TilePoint,
+  UnitType,
   WorldState,
 } from "../core/types";
 
@@ -110,8 +111,27 @@ export class GameSession {
   }
 
   public setSelection(ids: string[]): void {
-    this.sessionState.selectedIds = ids.filter((id) => this.getWorld().entities[id] !== undefined);
+    const seen = new Set<string>();
+    this.sessionState.selectedIds = ids.filter((id) => {
+      if (seen.has(id) || this.getWorld().entities[id] === undefined) {
+        return false;
+      }
+      seen.add(id);
+      return true;
+    });
     this.notify();
+  }
+
+  public addSelection(ids: string[]): void {
+    this.setSelection([...this.sessionState.selectedIds, ...ids]);
+  }
+
+  public selectAllUnitsOfType(unitType: UnitType): void {
+    const ids = Object.values(this.getWorld().entities)
+      .filter((entity): entity is import("../core/types").UnitEntity => entity.kind === "unit" && entity.playerId === "player")
+      .filter((entity) => entity.unitType === unitType)
+      .map((entity) => entity.id);
+    this.setSelection(ids);
   }
 
   public clearSelection(): void {
