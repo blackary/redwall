@@ -21,9 +21,24 @@ type UnitPalette = {
   metal: number;
   shadow: number;
 };
+type UnitSpecies = "mouse" | "shrew" | "otter" | "hare" | "badger" | "machine";
 
 function clamp(value: number, minimum: number, maximum: number): number {
   return Math.min(maximum, Math.max(minimum, value));
+}
+
+function mixColor(base: number, target: number, amount: number): number {
+  const ratio = clamp(amount, 0, 1);
+  const baseRed = (base >> 16) & 0xff;
+  const baseGreen = (base >> 8) & 0xff;
+  const baseBlue = base & 0xff;
+  const targetRed = (target >> 16) & 0xff;
+  const targetGreen = (target >> 8) & 0xff;
+  const targetBlue = target & 0xff;
+  const red = Math.round(baseRed + (targetRed - baseRed) * ratio);
+  const green = Math.round(baseGreen + (targetGreen - baseGreen) * ratio);
+  const blue = Math.round(baseBlue + (targetBlue - baseBlue) * ratio);
+  return (red << 16) | (green << 8) | blue;
 }
 
 function getQueueItemTotalMs(building: BuildingEntity): number | undefined {
@@ -81,6 +96,23 @@ function getBuildingPalette(building: BuildingEntity): BuildingPalette {
   }
 }
 
+function getUnitSpecies(unit: UnitEntity): UnitSpecies {
+  switch (unit.unitType) {
+    case "shrewScout":
+      return "shrew";
+    case "otterSkirmisher":
+      return "otter";
+    case "hareRunner":
+      return "hare";
+    case "badgerChampion":
+      return "badger";
+    case "ramCart":
+      return "machine";
+    default:
+      return "mouse";
+  }
+}
+
 function getUnitPalette(unit: UnitEntity): UnitPalette {
   const friendly = unit.playerId === "player";
   const base = friendly
@@ -92,10 +124,16 @@ function getUnitPalette(unit: UnitEntity): UnitPalette {
       return { ...base, cloth: friendly ? 0x5c7254 : 0x5d3326 };
     case "shrewScout":
       return { ...base, fur: friendly ? 0xc8b89d : 0xb87368, cloth: friendly ? 0x4f6c81 : 0x6d3640 };
-    case "archer":
+    case "militia":
+      return { ...base, fur: friendly ? 0xd9c59f : 0xc97d6b, cloth: friendly ? 0x6a5139 : 0x723830 };
+    case "shieldbearer":
+      return { ...base, fur: friendly ? 0xe1cfab : 0xca806e, cloth: friendly ? 0x6a4b34 : 0x6f3027 };
     case "slinger":
+      return { ...base, fur: friendly ? 0xe2d0ae : 0xc78673, cloth: friendly ? 0x4e6f57 : 0x6a4032 };
+    case "archer":
+      return { ...base, fur: friendly ? 0xe0cba4 : 0xc97f6d, cloth: friendly ? 0x4f6a5e : 0x6a3330 };
     case "otterSkirmisher":
-      return { ...base, cloth: friendly ? 0x556b7f : 0x6b3838 };
+      return { ...base, fur: friendly ? 0x8f7253 : 0x8d5048, cloth: friendly ? 0x436f73 : 0x5f3232, accent: friendly ? 0xe4cb8c : 0xd99272 };
     case "hareRunner":
       return { ...base, fur: friendly ? 0xe9cf9f : 0xd2856d, cloth: friendly ? 0xa34a3c : 0x7b2d27 };
     case "badgerChampion":
@@ -685,67 +723,279 @@ export class RedwallScene extends Phaser.Scene {
   private drawUnit(graphics: Phaser.GameObjects.Graphics, unit: UnitEntity, selected: boolean): void {
     const point = this.tileToScreen(unit.position);
     const palette = getUnitPalette(unit);
-    const size = unit.unitType === "badgerChampion" ? 16 : unit.unitType === "ramCart" ? 17 : unit.unitType === "hareRunner" ? 13 : 11;
+    const species = getUnitSpecies(unit);
+    const size = species === "badger"
+      ? 16
+      : species === "machine"
+        ? 17
+        : species === "hare"
+          ? 13
+          : species === "otter"
+            ? 12
+            : species === "shrew"
+              ? 10
+              : 11;
     if (selected) {
       graphics.lineStyle(2, 0xf2dfa8, 1);
-      graphics.strokeEllipse(point.x, point.y + 14, 36, 16);
+      graphics.strokeEllipse(point.x, point.y + 15, species === "machine" ? 40 : 36, species === "machine" ? 18 : 16);
     }
     graphics.fillStyle(palette.shadow, 0.25);
-    graphics.fillEllipse(point.x, point.y + 16, size * 2.2, 10);
+    graphics.fillEllipse(point.x, point.y + 16, species === "machine" ? size * 2.6 : size * 2.2, species === "machine" ? 12 : 10);
 
-    if (unit.unitType === "ramCart") {
-      graphics.fillStyle(palette.fur, 1);
-      graphics.fillRoundedRect(point.x - 16, point.y - 2, 32, 16, 5);
-      graphics.fillStyle(palette.cloth, 1);
-      graphics.fillTriangle(point.x + 8, point.y + 4, point.x + 26, point.y + 10, point.x + 8, point.y + 16);
-      graphics.fillStyle(palette.metal, 1);
-      graphics.fillCircle(point.x - 10, point.y + 16, 5);
-      graphics.fillCircle(point.x + 10, point.y + 16, 5);
+    if (species === "machine") {
+      this.drawRamCart(graphics, point, palette);
     } else {
+      const belly = mixColor(palette.fur, 0xf8f2e4, species === "badger" ? 0.45 : 0.3);
+      const cloak = mixColor(palette.cloth, 0x1a130d, 0.18);
+      this.drawSpeciesTail(graphics, point, size, palette, species);
+      this.drawSpeciesLegs(graphics, point, size, palette, species);
+      graphics.fillStyle(cloak, 0.95);
+      graphics.fillTriangle(point.x - size * 0.9, point.y + 4, point.x + size * 0.8, point.y + 4, point.x - size * 0.08, point.y + size * 1.5);
       graphics.fillStyle(palette.cloth, 1);
-      graphics.fillEllipse(point.x, point.y + 5, size * 1.6, size * 1.9);
-      graphics.fillStyle(palette.fur, 1);
-      graphics.fillCircle(point.x, point.y - 7, size * 0.58);
-
-      if (unit.unitType === "hareRunner") {
-        graphics.fillStyle(palette.fur, 1);
-        graphics.fillTriangle(point.x - 6, point.y - 10, point.x - 2, point.y - 28, point.x + 1, point.y - 10);
-        graphics.fillTriangle(point.x + 2, point.y - 10, point.x + 6, point.y - 30, point.x + 9, point.y - 10);
-      }
-      if (unit.unitType === "shrewScout") {
-        graphics.lineStyle(2, palette.accent, 0.9);
-        graphics.strokeLineShape(new Phaser.Geom.Line(point.x - 4, point.y + 8, point.x - 16, point.y + 18));
-      }
-      if (unit.unitType === "badgerChampion") {
-        graphics.fillStyle(0x1c1c1c, 1);
-        graphics.fillRect(point.x - 2, point.y - 13, 4, 12);
-        graphics.fillRect(point.x - 10, point.y - 11, 4, 8);
-        graphics.fillRect(point.x + 6, point.y - 11, 4, 8);
-      }
-      if (UNIT_DEFINITIONS[unit.unitType].tags.includes("ranged")) {
-        graphics.lineStyle(2, palette.accent, 0.95);
-        graphics.strokeLineShape(new Phaser.Geom.Line(point.x + 8, point.y - 2, point.x + 16, point.y + 10));
-        graphics.strokeLineShape(new Phaser.Geom.Line(point.x + 16, point.y - 2, point.x + 16, point.y + 10));
-      } else if (unit.unitType === "worker") {
-        graphics.fillStyle(palette.accent, 1);
-        graphics.fillRect(point.x + 8, point.y - 6, 3, 18);
-        graphics.fillRect(point.x + 5, point.y - 8, 10, 4);
-      } else {
-        graphics.fillStyle(palette.metal, 1);
-        graphics.fillRect(point.x + 8, point.y - 8, 3, 22);
-        if (unit.unitType === "shieldbearer") {
-          graphics.fillStyle(palette.accent, 1);
-          graphics.fillCircle(point.x - 10, point.y + 4, 8);
-        }
-      }
+      graphics.fillRoundedRect(point.x - size * 0.62, point.y - 2, size * 1.2, size * 1.38, 6);
+      graphics.fillStyle(mixColor(palette.accent, 0xffffff, 0.18), 0.95);
+      graphics.fillRect(point.x - size * 0.42, point.y + size * 0.34, size * 0.84, 3);
+      graphics.fillStyle(belly, 0.9);
+      graphics.fillEllipse(point.x + size * 0.04, point.y + size * 0.2, size * 0.8, size * 0.98);
+      this.drawSpeciesHead(graphics, point, size, palette, species);
+      this.drawUnitGear(graphics, point, size, palette, unit, species);
+      graphics.fillStyle(palette.accent, 0.92);
+      graphics.fillRect(point.x - 4, point.y - 1, 8, 10);
     }
-
-    graphics.fillStyle(palette.accent, 0.9);
-    graphics.fillRect(point.x - 4, point.y - 1, 8, 10);
     graphics.fillStyle(0x20160f, 1);
     graphics.fillRect(point.x - 16, point.y - 24, 32, 5);
     graphics.fillStyle(0x79bb72, 1);
     graphics.fillRect(point.x - 16, point.y - 24, 32 * Math.max(0, unit.hp) / unit.maxHp, 5);
+  }
+
+  private drawRamCart(graphics: Phaser.GameObjects.Graphics, point: TilePoint, palette: UnitPalette): void {
+    const wood = mixColor(palette.fur, 0x4f321d, 0.36);
+    const hide = mixColor(palette.cloth, 0xd2bf8d, 0.16);
+    graphics.fillStyle(wood, 1);
+    graphics.fillRoundedRect(point.x - 18, point.y + 1, 28, 13, 4);
+    graphics.fillStyle(mixColor(wood, 0xf3e1b6, 0.18), 0.95);
+    graphics.fillRect(point.x - 17, point.y + 4, 22, 3);
+    graphics.fillStyle(palette.metal, 1);
+    graphics.fillRect(point.x - 5, point.y + 3, 24, 4);
+    graphics.fillTriangle(point.x + 16, point.y + 2, point.x + 28, point.y + 8, point.x + 16, point.y + 14);
+    graphics.fillStyle(hide, 1);
+    graphics.fillTriangle(point.x - 5, point.y - 2, point.x + 11, point.y + 2, point.x - 2, point.y + 11);
+    graphics.fillStyle(palette.metal, 1);
+    graphics.fillCircle(point.x - 10, point.y + 17, 5);
+    graphics.fillCircle(point.x + 7, point.y + 17, 5);
+    graphics.fillStyle(mixColor(palette.fur, 0xf7eed5, 0.28), 1);
+    graphics.fillCircle(point.x - 4, point.y - 4, 4);
+    graphics.fillCircle(point.x + 4, point.y - 3, 4);
+    graphics.fillStyle(mixColor(palette.fur, 0xe5bf9f, 0.28), 1);
+    graphics.fillCircle(point.x - 6, point.y - 9, 2.3);
+    graphics.fillCircle(point.x - 1, point.y - 9, 2.3);
+    graphics.fillCircle(point.x + 2, point.y - 8, 2.3);
+    graphics.fillCircle(point.x + 7, point.y - 8, 2.3);
+    graphics.fillStyle(palette.accent, 0.95);
+    graphics.fillRect(point.x + 10, point.y - 1, 3, 14);
+    graphics.fillTriangle(point.x + 13, point.y - 1, point.x + 22, point.y + 2, point.x + 13, point.y + 7);
+  }
+
+  private drawSpeciesTail(
+    graphics: Phaser.GameObjects.Graphics,
+    point: TilePoint,
+    size: number,
+    palette: UnitPalette,
+    species: UnitSpecies,
+  ): void {
+    const tailColor = mixColor(palette.fur, palette.shadow, 0.2);
+    switch (species) {
+      case "mouse":
+        graphics.lineStyle(2, mixColor(palette.fur, 0xe8b8a7, 0.35), 0.95);
+        graphics.strokeLineShape(new Phaser.Geom.Line(point.x - size * 0.35, point.y + size * 0.9, point.x - size * 1.45, point.y + size * 1.1));
+        graphics.strokeLineShape(new Phaser.Geom.Line(point.x - size * 1.45, point.y + size * 1.1, point.x - size * 1.82, point.y + size * 0.4));
+        break;
+      case "shrew":
+        graphics.lineStyle(2, mixColor(palette.fur, 0xe4b9a4, 0.26), 0.95);
+        graphics.strokeLineShape(new Phaser.Geom.Line(point.x - size * 0.48, point.y + size * 0.82, point.x - size * 1.55, point.y + size * 0.95));
+        graphics.strokeLineShape(new Phaser.Geom.Line(point.x - size * 1.55, point.y + size * 0.95, point.x - size * 2.2, point.y + size * 0.18));
+        break;
+      case "otter":
+        graphics.fillStyle(tailColor, 0.95);
+        graphics.fillEllipse(point.x - size * 0.95, point.y + size * 0.84, size * 1.15, size * 0.4);
+        break;
+      case "hare":
+        graphics.fillStyle(mixColor(palette.fur, 0xf4eee2, 0.32), 1);
+        graphics.fillCircle(point.x - size * 0.7, point.y + size * 0.76, size * 0.16);
+        break;
+      case "badger":
+        graphics.fillStyle(tailColor, 1);
+        graphics.fillRoundedRect(point.x - size * 0.8, point.y + size * 0.75, size * 0.42, size * 0.2, 3);
+        break;
+      default:
+        break;
+    }
+  }
+
+  private drawSpeciesLegs(
+    graphics: Phaser.GameObjects.Graphics,
+    point: TilePoint,
+    size: number,
+    palette: UnitPalette,
+    species: UnitSpecies,
+  ): void {
+    const footColor = mixColor(palette.fur, palette.shadow, 0.16);
+    const footY = point.y + size * 1.26;
+    if (species === "hare") {
+      graphics.fillStyle(footColor, 1);
+      graphics.fillEllipse(point.x - size * 0.26, footY, size * 0.44, size * 0.18);
+      graphics.fillEllipse(point.x + size * 0.24, footY - 1, size * 0.5, size * 0.18);
+      return;
+    }
+    graphics.fillStyle(footColor, 1);
+    graphics.fillEllipse(point.x - size * 0.2, footY, size * 0.3, size * 0.16);
+    graphics.fillEllipse(point.x + size * 0.2, footY, size * 0.3, size * 0.16);
+  }
+
+  private drawSpeciesHead(
+    graphics: Phaser.GameObjects.Graphics,
+    point: TilePoint,
+    size: number,
+    palette: UnitPalette,
+    species: UnitSpecies,
+  ): void {
+    const headX = point.x + size * 0.06;
+    const headY = point.y - size * 0.76;
+    const earColor = mixColor(palette.fur, 0xe7bca3, 0.24);
+    const muzzleColor = mixColor(palette.fur, 0xf8f1e3, 0.38);
+
+    switch (species) {
+      case "mouse":
+        graphics.fillStyle(earColor, 1);
+        graphics.fillCircle(headX - size * 0.33, headY - size * 0.22, size * 0.24);
+        graphics.fillCircle(headX + size * 0.18, headY - size * 0.26, size * 0.24);
+        graphics.fillStyle(palette.fur, 1);
+        graphics.fillEllipse(headX, headY, size * 0.95, size * 0.82);
+        graphics.fillStyle(muzzleColor, 0.95);
+        graphics.fillEllipse(headX + size * 0.2, headY + size * 0.1, size * 0.46, size * 0.3);
+        graphics.fillStyle(mixColor(palette.accent, 0x1f1611, 0.2), 1);
+        graphics.fillCircle(headX + size * 0.42, headY + size * 0.08, size * 0.07);
+        this.drawWhiskers(graphics, headX + size * 0.22, headY + size * 0.1, size * 0.4, palette.shadow);
+        break;
+      case "shrew":
+        graphics.fillStyle(earColor, 1);
+        graphics.fillCircle(headX - size * 0.28, headY - size * 0.16, size * 0.13);
+        graphics.fillCircle(headX - size * 0.05, headY - size * 0.24, size * 0.12);
+        graphics.fillStyle(palette.fur, 1);
+        graphics.fillEllipse(headX - size * 0.02, headY, size * 0.78, size * 0.54);
+        graphics.fillTriangle(headX + size * 0.18, headY - size * 0.08, headX + size * 0.82, headY + size * 0.05, headX + size * 0.18, headY + size * 0.18);
+        graphics.fillStyle(mixColor(palette.accent, 0x1f1611, 0.18), 1);
+        graphics.fillCircle(headX + size * 0.76, headY + size * 0.05, size * 0.06);
+        this.drawWhiskers(graphics, headX + size * 0.48, headY + size * 0.06, size * 0.34, palette.shadow);
+        break;
+      case "otter":
+        graphics.fillStyle(earColor, 1);
+        graphics.fillCircle(headX - size * 0.2, headY - size * 0.22, size * 0.12);
+        graphics.fillCircle(headX + size * 0.12, headY - size * 0.24, size * 0.12);
+        graphics.fillStyle(palette.fur, 1);
+        graphics.fillEllipse(headX, headY, size * 0.98, size * 0.62);
+        graphics.fillStyle(muzzleColor, 0.95);
+        graphics.fillEllipse(headX + size * 0.18, headY + size * 0.05, size * 0.52, size * 0.26);
+        graphics.fillStyle(mixColor(palette.accent, 0x23170e, 0.16), 1);
+        graphics.fillCircle(headX + size * 0.42, headY + size * 0.04, size * 0.06);
+        this.drawWhiskers(graphics, headX + size * 0.18, headY + size * 0.06, size * 0.36, palette.shadow);
+        break;
+      case "hare":
+        graphics.fillStyle(palette.fur, 1);
+        graphics.fillTriangle(headX - size * 0.18, headY - size * 0.1, headX + size * 0.02, headY - size * 1.34, headX + size * 0.18, headY - size * 0.1);
+        graphics.fillTriangle(headX + size * 0.12, headY - size * 0.08, headX + size * 0.36, headY - size * 1.26, headX + size * 0.5, headY - size * 0.06);
+        graphics.fillStyle(earColor, 1);
+        graphics.fillTriangle(headX - size * 0.04, headY - size * 0.18, headX + size * 0.05, headY - size * 1.02, headX + size * 0.12, headY - size * 0.12);
+        graphics.fillTriangle(headX + size * 0.2, headY - size * 0.16, headX + size * 0.29, headY - size * 0.94, headX + size * 0.36, headY - size * 0.1);
+        graphics.fillStyle(palette.fur, 1);
+        graphics.fillEllipse(headX + size * 0.08, headY, size * 0.76, size * 0.7);
+        graphics.fillStyle(muzzleColor, 0.95);
+        graphics.fillEllipse(headX + size * 0.22, headY + size * 0.12, size * 0.38, size * 0.24);
+        graphics.fillStyle(mixColor(palette.accent, 0x23170e, 0.16), 1);
+        graphics.fillCircle(headX + size * 0.4, headY + size * 0.1, size * 0.06);
+        break;
+      case "badger":
+        graphics.fillStyle(mixColor(palette.shadow, 0x312723, 0.15), 1);
+        graphics.fillCircle(headX - size * 0.26, headY - size * 0.26, size * 0.18);
+        graphics.fillCircle(headX + size * 0.18, headY - size * 0.26, size * 0.18);
+        graphics.fillStyle(palette.fur, 1);
+        graphics.fillEllipse(headX, headY, size * 0.94, size * 0.82);
+        graphics.fillStyle(0x1c1c1c, 1);
+        graphics.fillRect(headX - size * 0.14, headY - size * 0.44, size * 0.12, size * 0.78);
+        graphics.fillRect(headX + size * 0.08, headY - size * 0.4, size * 0.12, size * 0.74);
+        graphics.fillStyle(muzzleColor, 0.95);
+        graphics.fillEllipse(headX + size * 0.22, headY + size * 0.16, size * 0.44, size * 0.3);
+        graphics.fillStyle(mixColor(palette.accent, 0x1e140e, 0.16), 1);
+        graphics.fillCircle(headX + size * 0.42, headY + size * 0.14, size * 0.07);
+        break;
+      default:
+        break;
+    }
+
+    graphics.fillStyle(0x2b1d13, 1);
+    graphics.fillCircle(headX + size * 0.06, headY - size * 0.02, size * 0.045);
+    graphics.fillCircle(headX + size * 0.28, headY - size * 0.04, size * 0.045);
+  }
+
+  private drawUnitGear(
+    graphics: Phaser.GameObjects.Graphics,
+    point: TilePoint,
+    size: number,
+    palette: UnitPalette,
+    unit: UnitEntity,
+    species: UnitSpecies,
+  ): void {
+    const wood = mixColor(palette.accent, 0x4a301b, 0.36);
+    if (UNIT_DEFINITIONS[unit.unitType].tags.includes("ranged")) {
+      graphics.lineStyle(2, wood, 0.95);
+      graphics.strokeLineShape(new Phaser.Geom.Line(point.x + size * 0.46, point.y - size * 0.28, point.x + size * 1.08, point.y + size * 0.58));
+      graphics.strokeLineShape(new Phaser.Geom.Line(point.x + size * 1.08, point.y - size * 0.22, point.x + size * 1.08, point.y + size * 0.58));
+      if (unit.unitType === "otterSkirmisher") {
+        graphics.lineStyle(2, palette.metal, 0.95);
+        graphics.strokeLineShape(new Phaser.Geom.Line(point.x - size * 0.08, point.y - size * 0.18, point.x + size * 1.12, point.y + size * 0.34));
+      }
+      return;
+    }
+
+    if (unit.unitType === "worker") {
+      graphics.fillStyle(wood, 1);
+      graphics.fillRect(point.x + size * 0.5, point.y - size * 0.34, 3, size * 1.58);
+      graphics.fillStyle(palette.metal, 1);
+      graphics.fillRect(point.x + size * 0.32, point.y - size * 0.48, size * 0.62, 4);
+      graphics.fillStyle(mixColor(palette.cloth, 0x684a2d, 0.28), 0.95);
+      graphics.fillCircle(point.x - size * 0.58, point.y + size * 0.44, size * 0.18);
+      return;
+    }
+
+    if (unit.unitType === "shieldbearer") {
+      graphics.fillStyle(palette.accent, 1);
+      graphics.fillCircle(point.x - size * 0.72, point.y + size * 0.38, size * 0.44);
+      graphics.fillStyle(mixColor(palette.metal, 0xf3e2b1, 0.12), 1);
+      graphics.fillCircle(point.x - size * 0.72, point.y + size * 0.38, size * 0.12);
+    }
+
+    graphics.fillStyle(species === "hare" ? palette.accent : palette.metal, 1);
+    graphics.fillRect(point.x + size * 0.52, point.y - size * 0.58, 3, size * 1.74);
+    if (unit.unitType === "badgerChampion") {
+      graphics.fillStyle(palette.metal, 1);
+      graphics.fillTriangle(point.x + size * 0.48, point.y - size * 0.5, point.x + size * 1.08, point.y - size * 0.2, point.x + size * 0.48, point.y + size * 0.08);
+      return;
+    }
+    if (unit.unitType === "hareRunner") {
+      graphics.lineStyle(2, palette.metal, 0.95);
+      graphics.strokeLineShape(new Phaser.Geom.Line(point.x + size * 0.48, point.y + size * 0.16, point.x + size * 1.22, point.y + size * 0.02));
+      return;
+    }
+    graphics.fillStyle(palette.metal, 1);
+    graphics.fillTriangle(point.x + size * 0.38, point.y - size * 0.7, point.x + size * 0.66, point.y - size * 1.02, point.x + size * 0.96, point.y - size * 0.64);
+  }
+
+  private drawWhiskers(graphics: Phaser.GameObjects.Graphics, x: number, y: number, length: number, color: number): void {
+    graphics.lineStyle(1, mixColor(color, 0xffffff, 0.12), 0.55);
+    graphics.strokeLineShape(new Phaser.Geom.Line(x - length * 0.6, y - 1, x - length * 1.15, y - length * 0.16));
+    graphics.strokeLineShape(new Phaser.Geom.Line(x - length * 0.55, y + 1, x - length * 1.14, y + length * 0.14));
+    graphics.strokeLineShape(new Phaser.Geom.Line(x + length * 0.22, y - 1, x + length * 0.82, y - length * 0.12));
+    graphics.strokeLineShape(new Phaser.Geom.Line(x + length * 0.18, y + 1, x + length * 0.8, y + length * 0.12));
   }
 
   private drawResource(graphics: Phaser.GameObjects.Graphics, entity: Entity): void {
