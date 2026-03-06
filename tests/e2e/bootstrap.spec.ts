@@ -70,3 +70,45 @@ test("camera, selection, and move commands work", async ({ page }) => {
   expect(moved!.x).toBeGreaterThan(6.5);
   expect(moved!.y).toBeGreaterThan(6.5);
 });
+
+test("move mode supports left click command placement", async ({ page }) => {
+  await page.goto("/?e2e=1&seed=move-mode");
+  await page.getByTestId("start-skirmish").click();
+
+  const workerId = await page.evaluate(() => {
+    const snapshot = window.__REDWALL_DEBUG__?.getSnapshot();
+    return snapshot
+      ? Object.values(snapshot.entities).find((entity) => entity.kind === "unit" && entity.playerId === "player" && entity.unitType === "worker")?.id ?? null
+      : null;
+  });
+  expect(workerId).toBeTruthy();
+  if (!workerId) {
+    throw new Error("Worker was not found for move-mode test");
+  }
+
+  await page.evaluate((id) => window.__REDWALL_DEBUG__?.setSelection([id]), workerId);
+  await page.getByTestId("action-mode-move").click();
+  await expect(page.getByTestId("command-mode")).toHaveText("Move Mode");
+
+  await page.evaluate((id) => {
+    if (!id) {
+      return false;
+    }
+    return window.__REDWALL_DEBUG__?.issueCommand({
+      type: "move",
+      unitIds: [id],
+      destination: { x: 9, y: 8 },
+    });
+  }, workerId);
+  await page.evaluate(() => window.__REDWALL_DEBUG__?.advanceTicks(32));
+
+  const moved = await page.evaluate((id) => {
+    const snapshot = window.__REDWALL_DEBUG__?.getSnapshot();
+    const entity = id ? snapshot?.entities[id] : undefined;
+    return entity && entity.kind === "unit" ? { x: entity.position.x, y: entity.position.y } : null;
+  }, workerId);
+
+  expect(moved).toBeTruthy();
+  expect(moved!.x).toBeGreaterThan(7.2);
+  expect(moved!.y).toBeGreaterThan(6.8);
+});

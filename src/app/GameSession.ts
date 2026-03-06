@@ -84,6 +84,7 @@ export class GameSession {
     return {
       selectedIds: [...this.sessionState.selectedIds],
       buildMode: this.sessionState.buildMode,
+      commandMode: this.sessionState.commandMode,
       paused: this.sessionState.paused,
     };
   }
@@ -100,6 +101,7 @@ export class GameSession {
       this.sessionState.buildMode = undefined;
     }
     if (handled) {
+      this.sessionState.commandMode = undefined;
       this.dirty = true;
       this.notify();
     }
@@ -121,6 +123,17 @@ export class GameSession {
       return;
     }
     this.sessionState.buildMode = buildingType;
+    if (buildingType) {
+      this.sessionState.commandMode = undefined;
+    }
+    this.notify();
+  }
+
+  public setCommandMode(mode?: SessionState["commandMode"]): void {
+    this.sessionState.commandMode = mode;
+    if (mode) {
+      this.sessionState.buildMode = undefined;
+    }
     this.notify();
   }
 
@@ -157,15 +170,19 @@ export class GameSession {
     }
     const delta = Math.min(64, timestamp - this.lastFrameMs);
     this.lastFrameMs = timestamp;
+    let changed = false;
     if (!this.sessionState.paused) {
       this.accumulatorMs += delta;
       while (this.accumulatorMs >= TICK_MS) {
         this.simulation.advanceTicks(1);
         this.dirty = true;
         this.accumulatorMs -= TICK_MS;
+        changed = true;
       }
     }
-    this.notify();
+    if (changed) {
+      this.notify();
+    }
     this.animationFrame = window.requestAnimationFrame((nextTimestamp) => this.loop(nextTimestamp));
   }
 

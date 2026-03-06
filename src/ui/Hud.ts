@@ -1,7 +1,7 @@
+import { GameSession } from "../app/GameSession";
 import { BUILDING_DEFINITIONS, RESEARCH_DEFINITIONS, UNIT_DEFINITIONS } from "../core/content";
 import { tileIndex } from "../core/map";
 import type { Age, BuildingEntity, BuildingType, Entity, ResearchId, UnitEntity, UnitType } from "../core/types";
-import { GameSession } from "../app/GameSession";
 
 function formatAge(age: Age): string {
   return age === "settlement" ? "Settlement Age" : age === "abbey" ? "Abbey Age" : "Warhost Age";
@@ -17,10 +17,11 @@ export class Hud {
   private readonly minimapCanvas: HTMLCanvasElement;
   private readonly actionsHost: HTMLDivElement;
   private readonly selectionHost: HTMLDivElement;
-  private readonly continueHint: HTMLParagraphElement;
+  private readonly hintHost: HTMLParagraphElement;
   private readonly resourceValues: Record<string, HTMLSpanElement>;
   private readonly ageLabel: HTMLSpanElement;
-  private readonly outcomeLabel: HTMLDivElement;
+  private readonly commandLabel: HTMLSpanElement;
+  private readonly outcomeLabel: HTMLParagraphElement;
 
   public constructor(session: GameSession, root: HTMLDivElement) {
     this.session = session;
@@ -37,6 +38,7 @@ export class Hud {
         </div>
         <div class="meta-strip">
           <span data-testid="age-label">Settlement Age</span>
+          <span data-testid="command-mode">Context</span>
           <button class="secondary-button" data-testid="pause-button">Pause</button>
         </div>
       </section>
@@ -44,7 +46,7 @@ export class Hud {
         <div class="panel selection-panel">
           <div class="panel-heading">Selection</div>
           <div data-testid="selection-panel"></div>
-          <p class="hint" data-testid="build-hint">Select units with left click. Right click to move or interact.</p>
+          <p class="hint" data-testid="build-hint">Select units with left click. Right click, Ctrl+click, or Alt+left-click to command.</p>
         </div>
         <div class="panel action-panel">
           <div class="panel-heading">Orders</div>
@@ -61,9 +63,10 @@ export class Hud {
     this.minimapCanvas = this.root.querySelector("[data-testid='minimap']") as HTMLCanvasElement;
     this.actionsHost = this.root.querySelector("[data-testid='action-panel']") as HTMLDivElement;
     this.selectionHost = this.root.querySelector("[data-testid='selection-panel']") as HTMLDivElement;
-    this.continueHint = this.root.querySelector("[data-testid='build-hint']") as HTMLParagraphElement;
+    this.hintHost = this.root.querySelector("[data-testid='build-hint']") as HTMLParagraphElement;
     this.ageLabel = this.root.querySelector("[data-testid='age-label']") as HTMLSpanElement;
-    this.outcomeLabel = this.root.querySelector("[data-testid='outcome-label']") as HTMLDivElement;
+    this.commandLabel = this.root.querySelector("[data-testid='command-mode']") as HTMLSpanElement;
+    this.outcomeLabel = this.root.querySelector("[data-testid='outcome-label']") as HTMLParagraphElement;
     this.resourceValues = {
       food: this.root.querySelector("[data-testid='food-value']") as HTMLSpanElement,
       timber: this.root.querySelector("[data-testid='timber-value']") as HTMLSpanElement,
@@ -87,12 +90,18 @@ export class Hud {
   public render(): void {
     const world = this.session.getWorld();
     const player = world.players.player;
+    const sessionState = this.session.getSessionState();
     this.resourceValues.food.textContent = `${Math.round(player.resources.food)}`;
     this.resourceValues.timber.textContent = `${Math.round(player.resources.timber)}`;
     this.resourceValues.stone.textContent = `${Math.round(player.resources.stone)}`;
     this.resourceValues.iron.textContent = `${Math.round(player.resources.iron)}`;
     this.resourceValues.population.textContent = `${player.populationUsed}/${player.populationCap}`;
     this.ageLabel.textContent = formatAge(player.age);
+    this.commandLabel.textContent = sessionState.buildMode
+      ? `Build: ${BUILDING_DEFINITIONS[sessionState.buildMode].label}`
+      : sessionState.commandMode
+        ? `${formatLabel(sessionState.commandMode)} Mode`
+        : "Context";
     this.outcomeLabel.textContent =
       world.outcome === "playerVictory"
         ? "Victory in Mossflower."
@@ -105,9 +114,11 @@ export class Hud {
     this.actionsHost.innerHTML = "";
     if (selected.length === 0) {
       this.selectionHost.innerHTML = "<p class='hint'>No current selection.</p>";
-      this.continueHint.textContent = this.session.getSessionState().buildMode
-        ? `Build mode: ${BUILDING_DEFINITIONS[this.session.getSessionState().buildMode as BuildingType].label}. Right click on the map to place it.`
-        : "Select units with left click. Right click to move or interact.";
+      this.hintHost.textContent = sessionState.buildMode
+        ? `Build mode: ${BUILDING_DEFINITIONS[sessionState.buildMode as BuildingType].label}. Left click to place, or use right click/Ctrl+click.`
+        : sessionState.commandMode
+          ? `${formatLabel(sessionState.commandMode)} mode armed. Left click to issue that order.`
+          : "Select units with left click. Right click, Ctrl+click, or Alt+left-click to command.";
     } else if (selected.length === 1) {
       const entity = selected[0];
       this.selectionHost.append(this.renderSelectionCard(entity));
@@ -118,6 +129,7 @@ export class Hud {
       wrapper.innerHTML = `<div class="selection-title">${selected.length} units selected</div>`;
       this.selectionHost.append(wrapper);
       this.renderGroupActions(selected.filter((entity): entity is UnitEntity => entity.kind === "unit"));
+      this.hintHost.textContent = "Group selected. Use Move, Attack, or Gather modes for left-click orders.";
     }
 
     this.drawMinimap();
@@ -153,6 +165,11 @@ export class Hud {
 
   private renderActions(entity: Entity): void {
     if (entity.kind === "unit") {
+      this.actionsHost.append(
+        this.createButton("Move", "action-mode-move", () => this.session.setCommandMode("move")),
+        this.createButton("Gather", "action-mode-gather", () => this.session.setCommandMode("gather")),
+        this.createButton("Attack", "action-mode-attack", () => this.session.setCommandMode("attack")),
+      );
       if (UNIT_DEFINITIONS[entity.unitType].tags.includes("worker")) {
         const buildingOptions: BuildingType[] = [
           "dormitory",
@@ -167,15 +184,21 @@ export class Hud {
           "gate",
           "workshop",
         ];
-        this.actionsHost.append(...buildingOptions.map((buildingType) => this.createButton(
-          BUILDING_DEFINITIONS[buildingType].label,
-          `action-build-${buildingType}`,
-          () => this.session.setBuildMode(buildingType),
-        )));
+        this.actionsHost.append(
+          ...buildingOptions.map((buildingType) =>
+            this.createButton(
+              BUILDING_DEFINITIONS[buildingType].label,
+              `action-build-${buildingType}`,
+              () => this.session.setBuildMode(buildingType),
+            ),
+          ),
+        );
       } else {
-        this.actionsHost.append(this.createButton("Stop", "action-stop", () => {
-          this.session.issueCommand({ type: "stop", unitIds: [entity.id] });
-        }));
+        this.actionsHost.append(
+          this.createButton("Stop", "action-stop", () => {
+            this.session.issueCommand({ type: "stop", unitIds: [entity.id] });
+          }),
+        );
       }
       return;
     }
@@ -183,6 +206,8 @@ export class Hud {
     if (entity.kind !== "building" || !entity.completed) {
       return;
     }
+
+    this.actionsHost.append(this.createButton("Set Rally", "action-mode-rally", () => this.session.setCommandMode("rally")));
 
     if (entity.buildingType === "abbeyHall") {
       this.actionsHost.append(
@@ -227,21 +252,22 @@ export class Hud {
       this.actionsHost.innerHTML = "<p class='hint'>No actions available.</p>";
       return;
     }
+    this.actionsHost.append(
+      this.createButton("Move", "action-group-move", () => this.session.setCommandMode("move")),
+      this.createButton("Attack", "action-group-attack", () => this.session.setCommandMode("attack")),
+      this.createButton("Gather", "action-group-gather", () => this.session.setCommandMode("gather")),
+    );
     const workerPresent = units.some((unit) => UNIT_DEFINITIONS[unit.unitType].tags.includes("worker"));
     if (workerPresent) {
-      this.actionsHost.append(this.createButton("Build Dormitory", "action-build-dormitory", () => {
-        this.session.setBuildMode("dormitory");
-      }));
-      this.actionsHost.append(this.createButton("Build Barracks", "action-build-barracks", () => {
-        this.session.setBuildMode("barracks");
-      }));
-      this.actionsHost.append(this.createButton("Build Tower", "action-build-tower", () => {
-        this.session.setBuildMode("tower");
-      }));
+      this.actionsHost.append(this.createButton("Build Dormitory", "action-build-dormitory", () => this.session.setBuildMode("dormitory")));
+      this.actionsHost.append(this.createButton("Build Barracks", "action-build-barracks", () => this.session.setBuildMode("barracks")));
+      this.actionsHost.append(this.createButton("Build Tower", "action-build-tower", () => this.session.setBuildMode("tower")));
     }
-    this.actionsHost.append(this.createButton("Stop", "action-group-stop", () => {
-      this.session.issueCommand({ type: "stop", unitIds: units.map((unit) => unit.id) });
-    }));
+    this.actionsHost.append(
+      this.createButton("Stop", "action-group-stop", () => {
+        this.session.issueCommand({ type: "stop", unitIds: units.map((unit) => unit.id) });
+      }),
+    );
   }
 
   private createTrainButton(building: BuildingEntity, unitType: UnitType): HTMLButtonElement {
@@ -282,6 +308,20 @@ export class Hud {
           this.session.setBuildMode("barracks");
         }
         break;
+      case "KeyM":
+        this.session.setCommandMode("move");
+        break;
+      case "KeyG":
+        this.session.setCommandMode("gather");
+        break;
+      case "KeyT":
+        this.session.setCommandMode("attack");
+        break;
+      case "KeyY":
+        if (single?.kind === "building") {
+          this.session.setCommandMode("rally");
+        }
+        break;
       case "KeyQ":
         if (single?.kind === "building" && single.buildingType === "abbeyHall") {
           this.session.issueCommand({ type: "train", buildingId: single.id, unitType: "worker" });
@@ -294,6 +334,7 @@ export class Hud {
         break;
       case "Escape":
         this.session.setBuildMode(undefined);
+        this.session.setCommandMode(undefined);
         break;
       default:
         break;
@@ -322,7 +363,12 @@ export class Hud {
       if (entity.kind === "resource") {
         continue;
       }
-      if (entity.playerId !== "player" && !world.players.player.visible[tileIndex(world.map, entity.kind === "unit" ? { x: Math.round(entity.position.x), y: Math.round(entity.position.y) } : entity.tile)]) {
+      if (
+        entity.playerId !== "player"
+        && !world.players.player.visible[
+          tileIndex(world.map, entity.kind === "unit" ? { x: Math.round(entity.position.x), y: Math.round(entity.position.y) } : entity.tile)
+        ]
+      ) {
         continue;
       }
       context.fillStyle = entity.playerId === "player" ? "#f1d387" : "#d16a6a";

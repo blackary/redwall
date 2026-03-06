@@ -22,6 +22,8 @@ export class RedwallScene extends Phaser.Scene {
   private dragCurrent?: TilePoint;
   private cameraKeys?: Record<string, Phaser.Input.Keyboard.Key>;
   private pings: Ping[] = [];
+  private isPanning = false;
+  private lastPanPoint?: { x: number; y: number };
 
   public constructor(session: GameSession) {
     super("battlefield");
@@ -37,6 +39,9 @@ export class RedwallScene extends Phaser.Scene {
     this.cameras.main.setScroll(-200, -120);
 
     this.input.mouse?.disableContextMenu();
+    this.game.canvas.addEventListener("contextmenu", (event) => {
+      event.preventDefault();
+    });
     this.cameraKeys = this.input.keyboard?.addKeys({
       up: Phaser.Input.Keyboard.KeyCodes.W,
       down: Phaser.Input.Keyboard.KeyCodes.S,
@@ -54,7 +59,13 @@ export class RedwallScene extends Phaser.Scene {
     });
 
     this.input.on("pointerdown", (pointer: Phaser.Input.Pointer) => {
-      if (pointer.button === 1) {
+      const domEvent = pointer.event as MouseEvent | undefined;
+      if (pointer.button === 1 || Boolean(domEvent?.shiftKey)) {
+        this.isPanning = true;
+        this.lastPanPoint = { x: pointer.x, y: pointer.y };
+        return;
+      }
+      if (this.isSecondaryCommand(pointer)) {
         return;
       }
       this.dragStart = this.screenToTile(pointer.worldX, pointer.worldY);
@@ -62,6 +73,14 @@ export class RedwallScene extends Phaser.Scene {
     });
 
     this.input.on("pointermove", (pointer: Phaser.Input.Pointer) => {
+      if (this.isPanning && this.lastPanPoint) {
+        const deltaX = (pointer.x - this.lastPanPoint.x) / this.cameras.main.zoom;
+        const deltaY = (pointer.y - this.lastPanPoint.y) / this.cameras.main.zoom;
+        this.cameras.main.scrollX -= deltaX;
+        this.cameras.main.scrollY -= deltaY;
+        this.lastPanPoint = { x: pointer.x, y: pointer.y };
+        return;
+      }
       if (!this.dragStart) {
         return;
       }
@@ -69,14 +88,27 @@ export class RedwallScene extends Phaser.Scene {
     });
 
     this.input.on("pointerup", (pointer: Phaser.Input.Pointer) => {
-      if (pointer.button === 2) {
-        this.handleRightClick(pointer.worldX, pointer.worldY);
+      if (this.isPanning) {
+        this.isPanning = false;
+        this.lastPanPoint = undefined;
+        this.clearDragSelection();
+        return;
+      }
+      if (this.isSecondaryCommand(pointer)) {
+        this.handleContextCommand(pointer.worldX, pointer.worldY);
+        this.clearDragSelection();
         return;
       }
       if (!this.dragStart) {
         return;
       }
       const end = this.screenToTile(pointer.worldX, pointer.worldY);
+      const sessionState = this.session.getSessionState();
+      if (sessionState.buildMode || sessionState.commandMode) {
+        this.handlePrimaryCommand(end);
+        this.clearDragSelection();
+        return;
+      }
       const start = this.dragStart;
       const distance = Math.abs(start.x - end.x) + Math.abs(start.y - end.y);
       if (distance > 1) {
@@ -84,8 +116,7 @@ export class RedwallScene extends Phaser.Scene {
       } else {
         this.handleSelection(end);
       }
-      this.dragStart = undefined;
-      this.dragCurrent = undefined;
+      this.clearDragSelection();
     });
   }
 
@@ -163,7 +194,7 @@ export class RedwallScene extends Phaser.Scene {
 
     this.drawTerrain(terrainGraphics, world);
     this.drawEntities(entityGraphics, world, session.selectedIds);
-    this.drawOverlay(overlayGraphics, world, session.buildMode, session.selectedIds);
+    this.drawOverlay(overlayGraphics, world, session.buildMode, session.commandMode, session.selectedIds);
   }
 
   private drawTerrain(graphics: Phaser.GameObjects.Graphics, world: WorldState): void {
@@ -224,7 +255,13 @@ export class RedwallScene extends Phaser.Scene {
     }
   }
 
-  private drawOverlay(graphics: Phaser.GameObjects.Graphics, world: WorldState, buildMode: BuildingType | undefined, selectedIds: string[]): void {
+  private drawOverlay(
+    graphics: Phaser.GameObjects.Graphics,
+    world: WorldState,
+    buildMode: BuildingType | undefined,
+    commandMode: "move" | "gather" | "attack" | "rally" | undefined,
+    selectedIds: string[],
+  ): void {
     if (this.dragStart && this.dragCurrent) {
       const start = this.tileToScreen(this.dragStart);
       const end = this.tileToScreen(this.dragCurrent);
@@ -252,6 +289,14 @@ export class RedwallScene extends Phaser.Scene {
       const height = definition.footprint.y * (this.tileHeight / 2);
       graphics.lineStyle(2, 0xdab16c, 0.9);
       graphics.strokeRect(top.x - width / 2, top.y, width * 2, height * 2);
+    }
+
+    if (!buildMode && commandMode && this.input.activePointer) {
+      const tile = this.screenToTile(this.input.activePointer.worldX, this.input.activePointer.worldY);
+      const point = this.tileToScreen({ x: tile.x + 0.5, y: tile.y + 0.5 });
+      const color = commandMode === "attack" ? 0xd16a6a : commandMode === "gather" ? 0x8fb66a : 0x8fbac3;
+      graphics.lineStyle(2, color, 0.9);
+      graphics.strokeCircle(point.x, point.y + 12, 18);
     }
 
     for (const ping of this.pings) {
@@ -351,7 +396,7 @@ export class RedwallScene extends Phaser.Scene {
     this.session.setSelection([clicked.id]);
   }
 
-  private handleRightClick(worldX: number, worldY: number): void {
+  private handleContextCommand(worldX: number, worldY: number): void {
     const sessionState = this.session.getSessionState();
     if (sessionState.selectedIds.length === 0) {
       return;
@@ -374,6 +419,7 @@ export class RedwallScene extends Phaser.Scene {
         buildingId: selected[0].id,
         tile,
       });
+      this.pings.push({ tile, ttlMs: 1800 });
       return;
     }
     const entity = this.findTargetAtTile(tile);
@@ -382,6 +428,54 @@ export class RedwallScene extends Phaser.Scene {
     } else if ((entity?.kind === "unit" || entity?.kind === "building") && entity.playerId === "ai") {
       this.session.issueCommand({ type: "attack", unitIds, targetId: entity.id });
     } else {
+      this.session.issueCommand({ type: "move", unitIds, destination: tile });
+      this.pings.push({ tile, ttlMs: 1800 });
+    }
+  }
+
+  private handlePrimaryCommand(tile: TilePoint): void {
+    const sessionState = this.session.getSessionState();
+    const selected = this.session.getSelectedEntities();
+    const unitIds = selected.filter((entity) => entity.kind === "unit").map((entity) => entity.id);
+    const target = this.findTargetAtTile(tile);
+
+    if (sessionState.buildMode && unitIds.length > 0) {
+      this.session.issueCommand({
+        type: "build",
+        unitIds,
+        buildingType: sessionState.buildMode,
+        tile,
+      });
+      this.pings.push({ tile, ttlMs: 1800 });
+      return;
+    }
+
+    if (sessionState.commandMode === "rally" && selected[0]?.kind === "building") {
+      this.session.issueCommand({
+        type: "setRally",
+        buildingId: selected[0].id,
+        tile,
+      });
+      this.pings.push({ tile, ttlMs: 1800 });
+      return;
+    }
+
+    if (sessionState.commandMode === "gather" && unitIds.length > 0 && target?.kind === "resource") {
+      this.session.issueCommand({ type: "gather", unitIds, targetId: target.id });
+      return;
+    }
+
+    if (sessionState.commandMode === "attack" && unitIds.length > 0) {
+      if ((target?.kind === "unit" || target?.kind === "building") && target.playerId === "ai") {
+        this.session.issueCommand({ type: "attack", unitIds, targetId: target.id });
+      } else {
+        this.session.issueCommand({ type: "attackMove", unitIds, destination: tile });
+      }
+      this.pings.push({ tile, ttlMs: 1800 });
+      return;
+    }
+
+    if (sessionState.commandMode === "move" && unitIds.length > 0) {
       this.session.issueCommand({ type: "move", unitIds, destination: tile });
       this.pings.push({ tile, ttlMs: 1800 });
     }
@@ -456,5 +550,15 @@ export class RedwallScene extends Phaser.Scene {
       x: clamp(Math.floor((isoX + isoY) / 2), 0, this.session.getWorld().map.width - 1),
       y: clamp(Math.floor((isoY - isoX) / 2), 0, this.session.getWorld().map.height - 1),
     };
+  }
+
+  private isSecondaryCommand(pointer: Phaser.Input.Pointer): boolean {
+    const domEvent = pointer.event as MouseEvent | undefined;
+    return pointer.button === 2 || Boolean(domEvent?.button === 2) || Boolean(domEvent?.ctrlKey) || Boolean(domEvent?.altKey);
+  }
+
+  private clearDragSelection(): void {
+    this.dragStart = undefined;
+    this.dragCurrent = undefined;
   }
 }

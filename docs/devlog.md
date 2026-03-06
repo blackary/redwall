@@ -16,4 +16,10 @@
 - Summary: Implemented the economy loop, construction, production queues, age progression prerequisites, snapshot serialization, IndexedDB/localStorage persistence, and menu-based resume of the latest local skirmish.
 - Tests run: `npm test`; `npm run build`; `npm run test:e2e -- tests/e2e/bootstrap.spec.ts tests/e2e/economy-resume.spec.ts`
 - Known gaps: Combat tuning, AI build/combat behavior, and late-game presentation are still incomplete.
+- Commit hash: `0f4e636`
+
+## 2026-03-06 Milestone 4 and 5
+- Summary: Tightened controls with explicit command modes and Mac-friendly secondary-command fallbacks, stabilized HUD updates, added AI expansion/attack behavior, and covered combat continuity plus AI pressure in tests.
+- Tests run: `npm test`; `npm run build`; `npm run test:e2e -- tests/e2e/bootstrap.spec.ts tests/e2e/economy-resume.spec.ts tests/e2e/skirmish-ai.spec.ts`
+- Known gaps: Deployment/docs polish and GitHub Pages automation still need to be finalized.
 - Commit hash: pending in git history after commit

@@ -188,6 +188,9 @@ export interface PlayerState {
   explored: boolean[];
   visible: boolean[];
   defeated: boolean;
+  aiState?: {
+    lastAttackTick: number;
+  };
 }
 
 export interface MapTile {
@@ -238,5 +241,6 @@ export type GameCommand =
 export interface SessionState {
   selectedIds: string[];
   buildMode?: BuildingType;
+  commandMode?: "move" | "gather" | "attack" | "rally";
   paused: boolean;
 }

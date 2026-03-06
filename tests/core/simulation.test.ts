@@ -70,4 +70,38 @@ describe("simulation economy and serialization", () => {
     expect(validateSnapshot(snapshot)).toBe(true);
     expect(validateSnapshot({ ...snapshot, version: snapshot.version + 1 })).toBe(false);
   });
+
+  test("ai expands and fields a small attack force", () => {
+    const simulation = new Simulation(createConfig("ai-pressure"));
+    simulation.advanceTicks(260);
+    const snapshot = simulation.getSnapshot();
+    const aiBuildings = Object.values(snapshot.entities).filter((entity) => entity.kind === "building" && entity.playerId === "ai");
+    const aiMilitary = Object.values(snapshot.entities).filter((entity) => entity.kind === "unit" && entity.playerId === "ai" && entity.unitType !== "worker");
+
+    expect(aiBuildings.length).toBeGreaterThan(1);
+    expect(aiMilitary.length).toBeGreaterThan(1);
+  });
+
+  test("combat continues across a snapshot restore", () => {
+    const config = createConfig("combat-resume");
+    const simulation = new Simulation(config);
+    const initial = simulation.getSnapshot();
+    const playerScout = Object.values(initial.entities).find((entity) => entity.kind === "unit" && entity.playerId === "player" && entity.unitType === "shrewScout");
+    const aiScout = Object.values(initial.entities).find((entity) => entity.kind === "unit" && entity.playerId === "ai" && entity.unitType === "shrewScout");
+
+    expect(playerScout).toBeTruthy();
+    expect(aiScout).toBeTruthy();
+
+    simulation.issueCommand({ type: "attack", unitIds: [playerScout!.id], targetId: aiScout!.id });
+    simulation.advanceTicks(70);
+    const midFight = simulation.getSnapshot();
+
+    const resumed = new Simulation(config, midFight);
+    resumed.advanceTicks(70);
+    const resumedScout = resumed.getSnapshot().entities[aiScout!.id];
+    expect(
+      resumedScout === undefined
+      || (resumedScout.kind === "unit" && aiScout?.kind === "unit" && resumedScout.hp < aiScout.hp),
+    ).toBe(true);
+  });
 });

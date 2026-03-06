@@ -37,6 +37,18 @@ function getInitialResources(playerId: PlayerId): ResourceBag {
     : createResourceBag(320, 360, 180, 120);
 }
 
+const AI_BUILD_LAYOUT: Partial<Record<BuildingType, TilePoint[]>> = {
+  dormitory: [{ x: -2, y: 3 }, { x: 3, y: -2 }, { x: 4, y: 2 }],
+  storehouse: [{ x: 4, y: -3 }, { x: -4, y: 1 }],
+  granary: [{ x: -3, y: -4 }, { x: -1, y: -5 }],
+  barracks: [{ x: 4, y: 3 }, { x: 6, y: 2 }],
+  range: [{ x: -5, y: 3 }, { x: -6, y: 2 }],
+  blacksmith: [{ x: -5, y: -2 }, { x: -4, y: -4 }],
+  tower: [{ x: 2, y: -5 }, { x: -5, y: 5 }],
+  longPatrolLodge: [{ x: 6, y: 5 }, { x: 5, y: 6 }],
+  workshop: [{ x: -7, y: -2 }, { x: -6, y: -4 }],
+};
+
 function createVisibility(size: number): boolean[] {
   return new Array(size).fill(false);
 }
@@ -127,8 +139,10 @@ function canPlaceBuilding(map: MapData, entities: Record<string, Entity>, buildi
 export class Simulation {
   private world: WorldState;
   private nextEntityId = 1;
+  private readonly config: GameConfig;
 
   public constructor(config: GameConfig, existingWorld?: WorldState) {
+    this.config = config;
     this.world = existingWorld ?? this.createInitialWorld(config);
   }
 
@@ -195,6 +209,9 @@ export class Simulation {
           explored: createVisibility(size),
           visible: createVisibility(size),
           defeated: false,
+          aiState: {
+            lastAttackTick: 0,
+          },
         },
         ai: {
           id: "ai",
@@ -207,6 +224,9 @@ export class Simulation {
           explored: createVisibility(size),
           visible: createVisibility(size),
           defeated: false,
+          aiState: {
+            lastAttackTick: 0,
+          },
         },
       },
       entities: {},
@@ -489,9 +509,59 @@ export class Simulation {
     this.updateUnits(deltaMs);
     this.updateProjectiles(deltaMs);
     this.updateTowers(deltaMs);
+    this.updateAi();
     this.recomputePopulation();
     this.recomputeFog();
     this.checkOutcome();
+  }
+
+  private updateAi(): void {
+    if (this.world.tick % 10 !== 0 || this.world.outcome !== "ongoing") {
+      return;
+    }
+    const aiHall = this.getPrimaryHall("ai");
+    if (!aiHall) {
+      return;
+    }
+    this.assignAiWorkers();
+    this.trainAiWorkers(aiHall);
+    if (this.tryBuildForAi("dormitory", () => this.getPopulationHeadroom("ai") <= 1)) {
+      return;
+    }
+    if (this.tryBuildForAi("storehouse", () => this.countPlayerBuildings("ai", "storehouse", true) < 1)) {
+      return;
+    }
+    if (this.tryBuildForAi("granary", () => this.countPlayerBuildings("ai", "granary", true) < 1)) {
+      return;
+    }
+    if (this.world.players.ai.age === "settlement" && this.canAdvanceAge("ai", "abbey")) {
+      this.queueAgeUp(aiHall.id, "abbey", "ai");
+      return;
+    }
+    if (this.tryBuildForAi("barracks", () => this.countPlayerBuildings("ai", "barracks", true) < 1)) {
+      return;
+    }
+    if (this.tryBuildForAi("range", () => this.world.players.ai.age !== "settlement" && this.countPlayerBuildings("ai", "range", true) < 1)) {
+      return;
+    }
+    if (this.tryBuildForAi("blacksmith", () => this.world.players.ai.age !== "settlement" && this.countPlayerBuildings("ai", "blacksmith", true) < 1)) {
+      return;
+    }
+    if (this.world.players.ai.age === "abbey" && this.canAdvanceAge("ai", "warhost")) {
+      this.queueAgeUp(aiHall.id, "warhost", "ai");
+      return;
+    }
+    if (this.tryBuildForAi("tower", () => this.world.players.ai.age !== "settlement" && this.countPlayerBuildings("ai", "tower", true) < 1)) {
+      return;
+    }
+    if (this.tryBuildForAi("longPatrolLodge", () => this.world.players.ai.age === "warhost" && this.countPlayerBuildings("ai", "longPatrolLodge", true) < 1)) {
+      return;
+    }
+    if (this.tryBuildForAi("workshop", () => this.world.players.ai.age === "warhost" && this.countPlayerBuildings("ai", "workshop", true) < 1)) {
+      return;
+    }
+    this.trainAiMilitary();
+    this.launchAiAttack();
   }
 
   private updateBuildings(deltaMs: number): void {
@@ -957,5 +1027,159 @@ export class Simulation {
       }
       return entity.playerId === playerId;
     });
+  }
+
+  private countPlayerBuildings(playerId: PlayerId, buildingType: BuildingType, includeIncomplete: boolean): number {
+    return Object.values(this.world.entities).filter((entity) => {
+      return entity.kind === "building"
+        && entity.playerId === playerId
+        && entity.buildingType === buildingType
+        && (includeIncomplete || entity.completed);
+    }).length;
+  }
+
+  private getPrimaryHall(playerId: PlayerId): BuildingEntity | undefined {
+    return Object.values(this.world.entities).find((entity) => {
+      return entity.kind === "building" && entity.playerId === playerId && entity.buildingType === "abbeyHall";
+    }) as BuildingEntity | undefined;
+  }
+
+  private getPopulationHeadroom(playerId: PlayerId): number {
+    const player = this.world.players[playerId];
+    return player.populationCap - player.populationUsed - this.getQueuedPopulation(playerId);
+  }
+
+  private assignAiWorkers(): void {
+    const workers = Object.values(this.world.entities).filter((entity) => entity.kind === "unit" && entity.playerId === "ai" && entity.unitType === "worker") as UnitEntity[];
+    workers.forEach((worker, index) => {
+      if (worker.order.type !== "idle" && worker.order.type !== "hold") {
+        return;
+      }
+      const desiredTypes: ResourceType[] = ["timber", "food", "stone", "iron"];
+      if (this.world.players.ai.age === "settlement") {
+        desiredTypes[2] = "food";
+      }
+      const preferred = desiredTypes[index % desiredTypes.length];
+      const target = this.findNearestResource({ x: Math.round(worker.position.x), y: Math.round(worker.position.y) }, preferred)
+        ?? this.findNearestResource({ x: Math.round(worker.position.x), y: Math.round(worker.position.y) }, "food");
+      if (target) {
+        this.issueCommand({ type: "gather", unitIds: [worker.id], targetId: target.id }, "ai");
+      }
+    });
+  }
+
+  private trainAiWorkers(hall: BuildingEntity): void {
+    const workerCount = Object.values(this.world.entities).filter((entity) => entity.kind === "unit" && entity.playerId === "ai" && entity.unitType === "worker").length;
+    if (workerCount < 7 && hall.queue.length === 0) {
+      this.queueTraining(hall.id, "worker", "ai");
+    }
+  }
+
+  private trainAiMilitary(): void {
+    const productionBuildings = Object.values(this.world.entities).filter((entity) => entity.kind === "building" && entity.playerId === "ai" && entity.completed) as BuildingEntity[];
+    for (const building of productionBuildings) {
+      if (building.queue.length > 0) {
+        continue;
+      }
+      if (building.buildingType === "barracks") {
+        this.queueTraining(building.id, this.world.players.ai.age === "settlement" ? "militia" : "shieldbearer", "ai");
+      }
+      if (building.buildingType === "range") {
+        this.queueTraining(building.id, this.world.players.ai.age === "abbey" ? "archer" : "otterSkirmisher", "ai");
+      }
+      if (building.buildingType === "longPatrolLodge") {
+        this.queueTraining(building.id, "hareRunner", "ai");
+      }
+      if (building.buildingType === "workshop") {
+        this.queueTraining(building.id, "ramCart", "ai");
+      }
+    }
+  }
+
+  private launchAiAttack(): void {
+    const aiState = this.world.players.ai.aiState;
+    if (!aiState) {
+      return;
+    }
+    const interval = this.config.difficulty === "hard" ? 60 : this.config.difficulty === "easy" ? 120 : 90;
+    if (this.world.tick - aiState.lastAttackTick < interval) {
+      return;
+    }
+    const army = Object.values(this.world.entities).filter((entity) => {
+      return entity.kind === "unit"
+        && entity.playerId === "ai"
+        && entity.unitType !== "worker"
+        && entity.order.type !== "build";
+    }) as UnitEntity[];
+    if (army.length < 3) {
+      return;
+    }
+    const target = this.getPrimaryHall("player");
+    const destination = target ? { x: target.tile.x, y: target.tile.y } : { x: this.world.map.playerSpawn.x, y: this.world.map.playerSpawn.y };
+    this.issueCommand({ type: "attackMove", unitIds: army.map((unit) => unit.id), destination }, "ai");
+    aiState.lastAttackTick = this.world.tick;
+  }
+
+  private tryBuildForAi(buildingType: BuildingType, predicate: () => boolean): boolean {
+    if (!predicate()) {
+      return false;
+    }
+    const player = this.world.players.ai;
+    const definition = BUILDING_DEFINITIONS[buildingType];
+    if (!isAgeUnlocked(player.age, definition.age) || !bagHasCost(player.resources, definition.cost)) {
+      return false;
+    }
+    const worker = Object.values(this.world.entities).find((entity) => {
+      return entity.kind === "unit"
+        && entity.playerId === "ai"
+        && entity.unitType === "worker"
+        && entity.order.type !== "build";
+    }) as UnitEntity | undefined;
+    const hall = this.getPrimaryHall("ai");
+    if (!worker || !hall) {
+      return false;
+    }
+    const tile = this.findBuildTileForAi(buildingType, hall.tile);
+    if (!tile) {
+      return false;
+    }
+    return this.issueCommand({ type: "build", unitIds: [worker.id], buildingType, tile }, "ai");
+  }
+
+  private findBuildTileForAi(buildingType: BuildingType, hallTile: TilePoint): TilePoint | undefined {
+    const preferred = AI_BUILD_LAYOUT[buildingType] ?? [];
+    for (const offset of preferred) {
+      const tile = { x: hallTile.x + offset.x, y: hallTile.y + offset.y };
+      if (canPlaceBuilding(this.world.map, this.world.entities, buildingType, tile)) {
+        return tile;
+      }
+    }
+    for (let radius = 2; radius < 8; radius += 1) {
+      for (let x = hallTile.x - radius; x <= hallTile.x + radius; x += 1) {
+        for (let y = hallTile.y - radius; y <= hallTile.y + radius; y += 1) {
+          const tile = { x, y };
+          if (canPlaceBuilding(this.world.map, this.world.entities, buildingType, tile)) {
+            return tile;
+          }
+        }
+      }
+    }
+    return undefined;
+  }
+
+  private findNearestResource(origin: TilePoint, resourceType: ResourceType): ResourceEntity | undefined {
+    let best: ResourceEntity | undefined;
+    let bestDistance = Number.POSITIVE_INFINITY;
+    for (const entity of Object.values(this.world.entities)) {
+      if (entity.kind !== "resource" || entity.resourceType !== resourceType || entity.amount <= 0) {
+        continue;
+      }
+      const distance = Math.abs(entity.tile.x - origin.x) + Math.abs(entity.tile.y - origin.y);
+      if (distance < bestDistance) {
+        best = entity;
+        bestDistance = distance;
+      }
+    }
+    return best;
   }
 }
