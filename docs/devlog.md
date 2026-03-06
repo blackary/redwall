@@ -59,3 +59,9 @@
 - Tests run: `npm test`; `npm run test:e2e`; `npm run build`
 - Known gaps: The game now reads much more like a classic RTS shell, but unit picking still needs a future dedicated pass for more precise sprite-level hit behavior without leaning on deterministic debug helpers in tests.
 - Commit hash: `c55d4ac`
+
+## 2026-03-06 Creature Art Pass
+- Summary: Reworked the battlefield creature rendering so the Abbey and vermin units read as woodland animals instead of generic humanoids, with species-specific heads, ears, snouts, whiskers, tails, gait, and weapon silhouettes for mice, shrews, otters, hares, badgers, and the ram cart crew.
+- Tests run: `npm test`; `npm run test:e2e`; `npm run build`
+- Known gaps: The units now read much more clearly as Redwall creatures at gameplay scale, but a later pass could still add bespoke hand-drawn selection portraits and higher-detail sprite-atlas animation.
+- Commit hash: `0e1e71d`
