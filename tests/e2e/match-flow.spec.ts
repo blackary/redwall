@@ -19,7 +19,7 @@ test("victory screen clears resumable state and returns to menu", async ({ page 
 
   await page.evaluate(() => window.__REDWALL_DEBUG__?.forceOutcome("playerVictory"));
   await expect(page.getByTestId("outcome-screen")).toBeVisible();
-  await expect(page.getByTestId("overlay-title")).toHaveText("Victory in Mossflower");
+  await expect(page.getByTestId("overlay-title")).toHaveText("Victory at Mossflower Meadows");
 
   await page.getByTestId("overlay-return-menu").click();
   await expect(page.getByTestId("main-menu")).toBeVisible();
@@ -34,7 +34,7 @@ test("defeat screen can immediately launch a fresh skirmish", async ({ page }) =
 
   await page.evaluate(() => window.__REDWALL_DEBUG__?.forceOutcome("playerDefeat"));
   await expect(page.getByTestId("outcome-screen")).toBeVisible();
-  await expect(page.getByTestId("overlay-title")).toHaveText("The Abbey Has Fallen");
+  await expect(page.getByTestId("overlay-title")).toHaveText("Abbey Alliance Defeated");
 
   await page.getByTestId("overlay-new-skirmish").click();
   await expect(page.getByTestId("game-shell")).toBeVisible();

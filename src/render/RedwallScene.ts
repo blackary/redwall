@@ -1,7 +1,8 @@
 import Phaser from "phaser";
 import { BUILDING_DEFINITIONS, RESEARCH_DEFINITIONS, UNIT_DEFINITIONS } from "../core/content";
+import { getFactionPalette } from "../core/factions";
 import { tileIndex } from "../core/map";
-import type { BuildingEntity, BuildingType, Entity, TilePoint, UnitEntity, WorldState } from "../core/types";
+import type { BuildingEntity, BuildingType, Entity, PlayerId, TilePoint, UnitEntity, WorldState } from "../core/types";
 import { GameSession } from "../app/GameSession";
 import type { GameSettings } from "../persistence/storage";
 import { getUnitAnimationState, type UnitAnimationState } from "./animation";
@@ -65,40 +66,40 @@ function getQueueItemTotalMs(building: BuildingEntity): number | undefined {
     : RESEARCH_DEFINITIONS.warhostAge.researchTimeMs;
 }
 
-function getBuildingPalette(building: BuildingEntity): BuildingPalette {
-  const playerPalette = building.playerId === "player"
-    ? {
-        wall: 0xc8ae80,
-        roof: 0x9a5f44,
-        trim: 0xf1e1b2,
-        accent: 0x58725f,
-        banner: 0xdcbf73,
-        shadow: 0x1b1410,
-      }
-    : {
-        wall: 0x8d5a52,
-        roof: 0x5f221c,
-        trim: 0xd8a48d,
-        accent: 0x6b2d27,
-        banner: 0xc96e5c,
-        shadow: 0x190f0f,
-      };
+function getFactionTheme(world: WorldState, playerId: PlayerId) {
+  return getFactionPalette(world.players[playerId].faction, playerId);
+}
+
+function getBuildingPalette(building: BuildingEntity, world: WorldState): BuildingPalette {
+  const factionTheme = getFactionTheme(world, building.playerId);
+  const playerPalette = {
+    wall: mixColor(factionTheme.main, 0x36271b, 0.18),
+    roof: mixColor(factionTheme.accent, 0x4d2c1d, 0.42),
+    trim: mixColor(factionTheme.main, 0xf8efd7, 0.38),
+    accent: mixColor(factionTheme.accent, factionTheme.main, 0.18),
+    banner: mixColor(factionTheme.main, factionTheme.accent, 0.34),
+    shadow: mixColor(factionTheme.main, 0x120d09, 0.84),
+  };
 
   switch (building.buildingType) {
     case "granary":
-      return { ...playerPalette, roof: building.playerId === "player" ? 0x8b7841 : 0x5c4130, accent: 0xc9944f };
+      return { ...playerPalette, roof: mixColor(playerPalette.roof, 0x8b7841, 0.42), accent: mixColor(playerPalette.accent, 0xc9944f, 0.5) };
     case "range":
-      return { ...playerPalette, roof: building.playerId === "player" ? 0x496d4c : 0x40503d, accent: 0xd8b77d };
+      return { ...playerPalette, roof: mixColor(playerPalette.roof, 0x496d4c, 0.56), accent: mixColor(playerPalette.accent, 0xd8b77d, 0.44) };
     case "blacksmith":
-      return { ...playerPalette, roof: building.playerId === "player" ? 0x4b4e55 : 0x423639, accent: 0xe08b4e };
+      return { ...playerPalette, roof: mixColor(playerPalette.roof, 0x4b4e55, 0.5), accent: mixColor(playerPalette.accent, 0xe08b4e, 0.54) };
     case "longPatrolLodge":
-      return { ...playerPalette, roof: building.playerId === "player" ? 0xa14538 : 0x7d2b26, accent: 0xefc178 };
+      return { ...playerPalette, roof: mixColor(playerPalette.roof, 0xa14538, 0.58), accent: mixColor(playerPalette.accent, 0xefc178, 0.48) };
     case "tower":
     case "wall":
     case "gate":
-      return { ...playerPalette, wall: building.playerId === "player" ? 0xa5a196 : 0x77635f, roof: building.playerId === "player" ? 0x7e8687 : 0x5a3d3a };
+      return {
+        ...playerPalette,
+        wall: mixColor(playerPalette.wall, 0x969389, 0.52),
+        roof: mixColor(playerPalette.roof, 0x6d6f74, 0.32),
+      };
     case "workshop":
-      return { ...playerPalette, roof: building.playerId === "player" ? 0x7a5a34 : 0x603825, accent: 0xc78948 };
+      return { ...playerPalette, roof: mixColor(playerPalette.roof, 0x7a5a34, 0.46), accent: mixColor(playerPalette.accent, 0xc78948, 0.48) };
     default:
       return playerPalette;
   }
@@ -121,33 +122,37 @@ function getUnitSpecies(unit: UnitEntity): UnitSpecies {
   }
 }
 
-function getUnitPalette(unit: UnitEntity): UnitPalette {
-  const friendly = unit.playerId === "player";
-  const base = friendly
-    ? { fur: 0xf0d7aa, cloth: 0x4a6456, accent: 0xdbbc73, metal: 0x8e8f95, shadow: 0x1d1712 }
-    : { fur: 0xc06d63, cloth: 0x5b2421, accent: 0xcf8f77, metal: 0x76686d, shadow: 0x170f0f };
+function getUnitPalette(unit: UnitEntity, world: WorldState): UnitPalette {
+  const factionTheme = getFactionTheme(world, unit.playerId);
+  const base = {
+    fur: unit.playerId === "player" ? 0xf0d7aa : 0xc06d63,
+    cloth: mixColor(factionTheme.accent, 0x241912, 0.22),
+    accent: mixColor(factionTheme.main, factionTheme.accent, 0.28),
+    metal: mixColor(factionTheme.main, 0x8e8f95, 0.58),
+    shadow: mixColor(factionTheme.main, 0x150f0b, 0.86),
+  };
 
   switch (unit.unitType) {
     case "worker":
-      return { ...base, cloth: friendly ? 0x5c7254 : 0x5d3326 };
+      return { ...base, cloth: mixColor(base.cloth, 0x5c7254, 0.4) };
     case "shrewScout":
-      return { ...base, fur: friendly ? 0xc8b89d : 0xb87368, cloth: friendly ? 0x4f6c81 : 0x6d3640 };
+      return { ...base, fur: unit.playerId === "player" ? 0xc8b89d : 0xb87368, cloth: mixColor(base.cloth, 0x4f6c81, 0.45) };
     case "militia":
-      return { ...base, fur: friendly ? 0xd9c59f : 0xc97d6b, cloth: friendly ? 0x6a5139 : 0x723830 };
+      return { ...base, fur: unit.playerId === "player" ? 0xd9c59f : 0xc97d6b, cloth: mixColor(base.cloth, 0x6a5139, 0.4) };
     case "shieldbearer":
-      return { ...base, fur: friendly ? 0xe1cfab : 0xca806e, cloth: friendly ? 0x6a4b34 : 0x6f3027 };
+      return { ...base, fur: unit.playerId === "player" ? 0xe1cfab : 0xca806e, cloth: mixColor(base.cloth, 0x6a4b34, 0.42) };
     case "slinger":
-      return { ...base, fur: friendly ? 0xe2d0ae : 0xc78673, cloth: friendly ? 0x4e6f57 : 0x6a4032 };
+      return { ...base, fur: unit.playerId === "player" ? 0xe2d0ae : 0xc78673, cloth: mixColor(base.cloth, 0x4e6f57, 0.4) };
     case "archer":
-      return { ...base, fur: friendly ? 0xe0cba4 : 0xc97f6d, cloth: friendly ? 0x4f6a5e : 0x6a3330 };
+      return { ...base, fur: unit.playerId === "player" ? 0xe0cba4 : 0xc97f6d, cloth: mixColor(base.cloth, 0x4f6a5e, 0.4) };
     case "otterSkirmisher":
-      return { ...base, fur: friendly ? 0x8f7253 : 0x8d5048, cloth: friendly ? 0x436f73 : 0x5f3232, accent: friendly ? 0xe4cb8c : 0xd99272 };
+      return { ...base, fur: unit.playerId === "player" ? 0x8f7253 : 0x8d5048, cloth: mixColor(base.cloth, 0x436f73, 0.42), accent: mixColor(base.accent, 0xe4cb8c, 0.35) };
     case "hareRunner":
-      return { ...base, fur: friendly ? 0xe9cf9f : 0xd2856d, cloth: friendly ? 0xa34a3c : 0x7b2d27 };
+      return { ...base, fur: unit.playerId === "player" ? 0xe9cf9f : 0xd2856d, cloth: mixColor(base.cloth, 0xa34a3c, 0.46) };
     case "badgerChampion":
-      return { fur: 0xe8e3d7, cloth: friendly ? 0x7a4334 : 0x6a2d28, accent: 0xf0d391, metal: 0xa9aaaf, shadow: 0x161212 };
+      return { fur: 0xe8e3d7, cloth: mixColor(base.cloth, 0x7a4334, 0.44), accent: mixColor(base.accent, 0xf0d391, 0.4), metal: mixColor(base.metal, 0xa9aaaf, 0.3), shadow: 0x161212 };
     case "ramCart":
-      return { fur: 0x8d6844, cloth: 0x6a4a2b, accent: friendly ? 0xd7b36f : 0xb96e56, metal: 0x77716c, shadow: 0x18120f };
+      return { fur: 0x8d6844, cloth: mixColor(base.cloth, 0x6a4a2b, 0.5), accent: mixColor(base.accent, 0xd7b36f, 0.26), metal: mixColor(base.metal, 0x77716c, 0.2), shadow: 0x18120f };
     default:
       return base;
   }
@@ -487,7 +492,7 @@ export class RedwallScene extends Phaser.Scene {
         continue;
       }
       if (entity.kind === "building") {
-        this.drawBuilding(graphics, entity, selectedIds.includes(entity.id), timeMs);
+        this.drawBuilding(graphics, entity, selectedIds.includes(entity.id), world, timeMs);
         continue;
       }
       this.drawUnit(graphics, entity, selectedIds.includes(entity.id), world, timeMs);
@@ -500,7 +505,7 @@ export class RedwallScene extends Phaser.Scene {
           ? this.tileToScreen(target.position)
           : this.tileToScreen({ x: target.tile.x + 0.5, y: target.tile.y + 0.5 })
         : undefined;
-      const trailColor = projectile.playerId === "player" ? 0xf2dfa8 : 0xc65d5d;
+      const trailColor = getFactionTheme(world, projectile.playerId).accent;
       if (targetPosition) {
         const trailEndX = point.x + (point.x - targetPosition.x) * 0.18;
         const trailEndY = point.y + (point.y - targetPosition.y) * 0.18 + 12;
@@ -574,10 +579,16 @@ export class RedwallScene extends Phaser.Scene {
     graphics.fillCircle(rally.x, rally.y, 5);
   }
 
-  private drawBuilding(graphics: Phaser.GameObjects.Graphics, building: BuildingEntity, selected: boolean, timeMs: number): void {
+  private drawBuilding(
+    graphics: Phaser.GameObjects.Graphics,
+    building: BuildingEntity,
+    selected: boolean,
+    world: WorldState,
+    timeMs: number,
+  ): void {
     const definition = BUILDING_DEFINITIONS[building.buildingType];
     const flashAmount = Math.max(0, Math.min(1, ((this.hitFlashes.get(building.id) ?? 0) - timeMs) / 160));
-    const basePalette = getBuildingPalette(building);
+    const basePalette = getBuildingPalette(building, world);
     const palette = flashAmount > 0
       ? {
           ...basePalette,
@@ -801,7 +812,7 @@ export class RedwallScene extends Phaser.Scene {
 
   private drawUnit(graphics: Phaser.GameObjects.Graphics, unit: UnitEntity, selected: boolean, world: WorldState, timeMs: number): void {
     const basePoint = this.tileToScreen(unit.position);
-    const palette = getUnitPalette(unit);
+    const palette = getUnitPalette(unit, world);
     const species = getUnitSpecies(unit);
     const pose = getUnitAnimationState(unit, timeMs, { reducedMotion: this.settings.reducedMotion });
     const point = {

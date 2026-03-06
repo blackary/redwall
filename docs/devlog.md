@@ -83,3 +83,9 @@
 - Tests run: `npm test`; `npm run test:e2e`; `npm run build`
 - Known gaps: Units now visibly work, march, and fight instead of sliding as static tokens, but a future pass could still add sprite-atlas animation, more directional facing, and richer death/impact effects.
 - Commit hash: `ae0ba70`
+
+## 2026-03-06 Chronicle Expansion Foundation
+- Summary: Added selectable map presets, faction bonuses, persistent Chronicle progression, a guided tutorial scenario, menu-side unlock feedback, faction-aware HUD/sidebar labeling, faction-colored battlefield rendering, map/faction persistence in saves, and unit plus Playwright coverage for unlocking Abbey Orchard and the Riverfolk Collective through tutorial completion.
+- Tests run: `npm test`; `npm run test:e2e`; `npm run build`
+- Known gaps: The game now supports multiple maps, factions, and a progression loop, but it still needs more playable factions, tutorial chapters, mission-style content, and deeper faction-specific art/audio to complete the full expansion plan.
+- Commit hash: `TBD`

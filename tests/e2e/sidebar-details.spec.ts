@@ -6,7 +6,7 @@ test("right sidebar stays visible and explains build actions in detail", async (
   await startSkirmish(page);
 
   await expect(page.getByTestId("hud-sidebar")).toBeVisible();
-  await expect(page.getByTestId("sidebar-title")).toHaveText("Abbey Advisor");
+  await expect(page.getByTestId("sidebar-title")).toHaveText("Abbey Alliance Advisor");
   await expect(page.getByTestId("sidebar-summary")).toContainText("Select a worker");
 
   const workerId = await page.evaluate(() => {

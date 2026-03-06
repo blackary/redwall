@@ -11,6 +11,11 @@ export async function startSkirmish(page: Page): Promise<void> {
   await waitForSession(page);
 }
 
+export async function startTutorial(page: Page): Promise<void> {
+  await page.getByTestId("start-tutorial").click();
+  await waitForSession(page);
+}
+
 export async function continueSkirmish(page: Page): Promise<void> {
   await page.getByTestId("continue-skirmish").click();
   await waitForSession(page);

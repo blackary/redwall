@@ -7,6 +7,10 @@ export function createSnapshot(world: WorldState, difficulty: Difficulty): SaveG
     timestamp: Date.now(),
     seed: world.seed,
     difficulty,
+    mapPreset: world.map.preset,
+    playerFaction: world.players.player.faction,
+    aiFaction: world.players.ai.faction,
+    scenario: world.scenario,
     elapsedMs: world.elapsedMs,
     world: JSON.parse(JSON.stringify(world)) as WorldState,
   };
@@ -21,5 +25,9 @@ export function validateSnapshot(snapshot: unknown): snapshot is SaveGameSnapsho
     && typeof candidate.timestamp === "number"
     && typeof candidate.seed === "number"
     && typeof candidate.elapsedMs === "number"
+    && typeof candidate.mapPreset === "string"
+    && typeof candidate.playerFaction === "string"
+    && typeof candidate.aiFaction === "string"
+    && typeof candidate.scenario === "string"
     && candidate.world !== undefined;
 }

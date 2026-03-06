@@ -183,6 +183,22 @@ select {
   accent-color: #d9ba73;
 }
 
+.setting-row select {
+  min-width: 210px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(232, 215, 173, 0.2);
+  background: rgba(13, 20, 18, 0.8);
+  color: #f4e8cf;
+}
+
+.menu-card > .primary-button,
+.menu-card > .secondary-button {
+  display: block;
+  width: 100%;
+  margin-top: 12px;
+}
+
 .control-copy {
   display: grid;
   gap: 8px;
@@ -434,6 +450,11 @@ select {
   background: rgba(255, 255, 255, 0.04);
 }
 
+.tutorial-card {
+  border: 1px solid rgba(217, 186, 115, 0.16);
+  background: linear-gradient(180deg, rgba(102, 84, 48, 0.16), rgba(255, 255, 255, 0.04));
+}
+
 .sidebar-label,
 .sidebar-section-title {
   color: #d9ba73;
@@ -518,6 +539,23 @@ select {
   line-height: 1.5;
 }
 
+.tutorial-step-list {
+  display: grid;
+  gap: 6px;
+}
+
+.tutorial-step {
+  color: #d7ceb7;
+}
+
+.tutorial-step.complete {
+  color: #f2dfa8;
+}
+
+.tutorial-step.complete::marker {
+  color: #d9ba73;
+}
+
 .dock-panel {
   min-height: 260px;
   display: grid;
@@ -536,6 +574,10 @@ select {
 .dock-kicker {
   color: #e7d9b0;
   font-size: 0.9rem;
+}
+
+.minimap-panel .dock-kicker {
+  font-weight: 700;
 }
 
 .panel-heading {
@@ -883,7 +925,7 @@ select {
   }
 
   .info-grid {
-    grid-template-columns: 1fr;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .canvas-shell,
@@ -912,11 +954,27 @@ select {
     justify-content: space-between;
   }
 
+  .setting-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .setting-row select {
+    min-width: 0;
+    width: 100%;
+  }
+
   .hud-overlay {
     padding: 14px;
   }
 
   .overlay-stats {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 640px) {
+  .info-grid {
     grid-template-columns: 1fr;
   }
 }

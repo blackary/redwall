@@ -1,6 +1,8 @@
 import { GameSession } from "../app/GameSession";
 import { AGE_ORDER, BUILDING_DEFINITIONS, RESEARCH_DEFINITIONS, UNIT_DEFINITIONS } from "../core/content";
-import { tileIndex } from "../core/map";
+import { getFactionAdjustedUnitDefinition, getFactionDefinition, getFactionPalette } from "../core/factions";
+import { getMapDefinition, tileIndex } from "../core/map";
+import { getTutorialState } from "../core/tutorial";
 import type {
   Age,
   BuildingEntity,
@@ -179,6 +181,10 @@ function clamp(value: number, minimum: number, maximum: number): number {
   return Math.min(maximum, Math.max(minimum, value));
 }
 
+function toCssHex(color: number): string {
+  return `#${color.toString(16).padStart(6, "0")}`;
+}
+
 function getPlayerQueuedUnits(session: GameSession): number {
   return Object.values(session.getWorld().entities)
     .filter((entity): entity is BuildingEntity => entity.kind === "building" && entity.playerId === "player")
@@ -276,6 +282,8 @@ export class Hud {
   private readonly clockLabel: HTMLSpanElement;
   private readonly economySummaryLabel: HTMLSpanElement;
   private readonly outcomeLabel: HTMLParagraphElement;
+  private readonly mapLabel: HTMLDivElement;
+  private readonly factionLabel: HTMLSpanElement;
   private readonly pauseButton: HTMLButtonElement;
   private readonly gridButton: HTMLButtonElement;
   private readonly motionButton: HTMLButtonElement;
@@ -332,8 +340,8 @@ export class Hud {
       <section class="hud-dock">
         <div class="panel dock-panel minimap-panel">
           <div class="dock-header">
-            <div class="panel-heading">Mossflower Meadows</div>
-            <span class="dock-kicker">Minimap</span>
+            <div class="panel-heading" data-testid="map-label">Mossflower Meadows</div>
+            <span class="dock-kicker" data-testid="faction-label">Abbey Alliance</span>
           </div>
           <canvas data-testid="minimap" width="180" height="180"></canvas>
           <p class="minimap-instructions">Left click the minimap to shift the camera. Double-click units to grab the full group.</p>
@@ -376,6 +384,8 @@ export class Hud {
     this.economySummaryLabel = this.root.querySelector("[data-testid='economy-summary']") as HTMLSpanElement;
     this.commandLabel = this.root.querySelector("[data-testid='command-mode']") as HTMLSpanElement;
     this.outcomeLabel = this.root.querySelector("[data-testid='outcome-label']") as HTMLParagraphElement;
+    this.mapLabel = this.root.querySelector("[data-testid='map-label']") as HTMLDivElement;
+    this.factionLabel = this.root.querySelector("[data-testid='faction-label']") as HTMLSpanElement;
     this.resourceValues = {
       food: this.root.querySelector("[data-testid='food-value']") as HTMLSpanElement,
       timber: this.root.querySelector("[data-testid='timber-value']") as HTMLSpanElement,
@@ -434,6 +444,8 @@ export class Hud {
     const world = this.session.getWorld();
     const player = world.players.player;
     const sessionState = this.session.getSessionState();
+    const tutorialState = getTutorialState(world, this.session.getSelectedEntities());
+    const faction = getFactionDefinition(player.faction);
     this.resourceValues.food.textContent = `${Math.round(player.resources.food)}`;
     this.resourceValues.timber.textContent = `${Math.round(player.resources.timber)}`;
     this.resourceValues.stone.textContent = `${Math.round(player.resources.stone)}`;
@@ -443,16 +455,29 @@ export class Hud {
     this.clockLabel.textContent = formatClock(world.elapsedMs);
     this.economySummaryLabel.textContent = this.getEconomySummary();
     this.commandLabel.textContent = this.getCommandLabel();
+    this.mapLabel.textContent = getMapDefinition(world.map.preset).label;
+    this.factionLabel.textContent = world.scenario === "tutorial" ? `${faction.label} Tutorial` : faction.label;
+    this.factionLabel.style.color = toCssHex(getFactionPalette(player.faction, "player").main);
     this.outcomeLabel.textContent =
-      world.outcome === "playerVictory"
-        ? "Victory in Mossflower."
-        : world.outcome === "playerDefeat"
-          ? "The Abbey alliance has fallen."
-          : "Hold the field. Destroy the enemy host.";
+      world.scenario === "tutorial"
+        ? tutorialState?.completed
+          ? "Tutorial complete. Return to the menu to claim Chronicle progress."
+          : tutorialState?.currentStep
+            ? `Tutorial: ${tutorialState.currentStep.label}.`
+            : "Follow the guided opening."
+        : world.outcome === "playerVictory"
+          ? `Victory on ${getMapDefinition(world.map.preset).label}.`
+          : world.outcome === "playerDefeat"
+            ? `The ${faction.label} host has fallen.`
+            : "Hold the field. Destroy the enemy host.";
     this.pauseButton.textContent = sessionState.paused ? "Resume" : "Pause";
     this.gridButton.textContent = this.settings.showGrid ? "Grid: On" : "Grid: Off";
     this.motionButton.textContent = this.settings.reducedMotion ? "Motion: Reduced" : "Motion: Full";
-    this.saveExitButton.textContent = world.outcome === "ongoing" ? "Save & Exit" : "Return to Menu";
+    this.saveExitButton.textContent = tutorialState?.completed
+      ? "Finish Tutorial"
+      : world.outcome === "ongoing"
+        ? "Save & Exit"
+        : "Return to Menu";
     this.renderOverlay(world.outcome, sessionState.paused, player.age, world.elapsedMs);
 
     const selected = this.session.getSelectedEntities();
@@ -463,8 +488,12 @@ export class Hud {
     if (selected.length === 0) {
       this.selectionHost.innerHTML = `
         <div class="selection-empty">
-          <div class="selection-title">Abbey Command</div>
-          <p class="hint">Open with workers, add dormitories early, and keep barracks and range producing once you hit Abbey Age.</p>
+          <div class="selection-title">${faction.label} Command</div>
+          <p class="hint">${
+            world.scenario === "tutorial"
+              ? "Follow the objective list in the right sidebar to learn the core opening sequence."
+              : `${faction.shortBonus} Open with workers, add dormitories early, and keep production running through Abbey Age.`
+          }</p>
         </div>
       `;
       this.hintHost.textContent = sessionState.buildMode
@@ -634,16 +663,23 @@ export class Hud {
     }
 
     const isOutcome = outcome !== "ongoing";
+    const world = this.session.getWorld();
+    const faction = getFactionDefinition(world.players.player.faction);
+    const mapLabel = getMapDefinition(world.map.preset).label;
     const title = outcome === "playerVictory"
-      ? "Victory in Mossflower"
+      ? `Victory at ${mapLabel}`
       : outcome === "playerDefeat"
-        ? "The Abbey Has Fallen"
-        : "Skirmish Paused";
+        ? `${faction.label} Defeated`
+        : world.scenario === "tutorial"
+          ? "Tutorial Paused"
+          : "Skirmish Paused";
     const summary = outcome === "playerVictory"
-      ? "The vermin host is broken. Regroup your woodland fighters and press the advantage."
+      ? `The enemy host is broken on ${mapLabel}. Regroup your woodland fighters and press the advantage.`
       : outcome === "playerDefeat"
-        ? "The raiders overran the Abbey alliance. Re-form the line and try a different opening."
-        : "Orders are suspended. Review queues, plan your next age-up, or save the field for later.";
+        ? `The ${faction.label} line collapsed. Re-form the opening and try a different composition or map.`
+        : world.scenario === "tutorial"
+          ? "Orders are suspended. Review the current objective in the sidebar, then resume the drill when ready."
+          : "Orders are suspended. Review queues, plan your next age-up, or save the field for later.";
     const time = formatDuration(elapsedMs);
 
     this.overlay.hidden = false;
@@ -693,7 +729,7 @@ export class Hud {
     card.className = "selection-card";
 
     if (entity.kind === "unit") {
-      const definition = UNIT_DEFINITIONS[entity.unitType];
+      const definition = getFactionAdjustedUnitDefinition(this.session.getWorld().players[entity.playerId].faction, UNIT_DEFINITIONS[entity.unitType]);
       const cargo = entity.carry ? `${formatLabel(entity.carry.type)} ${Math.round(entity.carry.amount)}` : "None";
       card.innerHTML = `
         <div class="selection-hero">
@@ -912,6 +948,9 @@ export class Hud {
   }
 
   private renderSidebar(selected: Entity[], actions: ActionDescriptor[]): void {
+    const world = this.session.getWorld();
+    const playerFaction = getFactionDefinition(world.players.player.faction);
+    const tutorialState = getTutorialState(world, selected);
     const focusedAction = this.resolveFocusedAction(actions);
     const sessionState = this.session.getSessionState();
     const selectedEntity = selected.length === 1 ? selected[0] : undefined;
@@ -924,18 +963,14 @@ export class Hud {
             <span class="dock-kicker">Field Manual</span>
           </div>
           <div class="sidebar-card">
-            <h3 data-testid="sidebar-title">Abbey Advisor</h3>
-            <p class="sidebar-copy" data-testid="sidebar-summary">Select a worker to open the full building list, or select a production building to see training, upgrade, and age-up requirements in detail.</p>
+            <h3 data-testid="sidebar-title">${playerFaction.label} Advisor</h3>
+            <p class="sidebar-copy" data-testid="sidebar-summary">${
+              world.scenario === "tutorial"
+                ? "The guided drill is active. Select a worker, follow the objective list below, and use the command card to learn the opening flow."
+                : `Select a worker to open the full building list, or select a production building to see ${playerFaction.label} training, upgrade, and age-up requirements in detail.`
+            }</p>
           </div>
-          <div class="sidebar-card">
-            <div class="sidebar-section-title">Build Flow</div>
-            <ol class="sidebar-steps">
-              <li>Select one or more workers.</li>
-              <li>Read the command card or this sidebar for building costs and unlock age.</li>
-              <li>Click a build card, then left click the battlefield to place it.</li>
-              <li>Use Esc to cancel if you change your mind.</li>
-            </ol>
-          </div>
+          ${this.getSidebarGuidanceCard(world.scenario === "tutorial", tutorialState)}
         </div>
       `;
       return;
@@ -1026,6 +1061,58 @@ export class Hud {
     if (previewActions.length === 0) {
       actionListHost.innerHTML = `<p class="sidebar-copy">No direct actions are available for this selection yet.</p>`;
     }
+
+    if (world.scenario === "tutorial" && tutorialState) {
+      this.sidebarHost.append(this.renderTutorialCard(tutorialState));
+    }
+  }
+
+  private getSidebarGuidanceCard(isTutorial: boolean, tutorialState: ReturnType<typeof getTutorialState>): string {
+    if (isTutorial && tutorialState) {
+      return `
+        <div class="sidebar-card tutorial-card" data-testid="tutorial-panel">
+          <div class="sidebar-section-title">Tutorial Objectives</div>
+          <div class="sidebar-status" data-testid="tutorial-progress">${tutorialState.steps.filter((step) => step.completed).length}/${tutorialState.steps.length} completed</div>
+          <p class="sidebar-copy" data-testid="tutorial-current-step">${
+            tutorialState.completed
+              ? "Opening drill completed. Finish the tutorial from the top bar to unlock the next Chronicle content."
+              : `${tutorialState.currentStep?.label}: ${tutorialState.currentStep?.description}`
+          }</p>
+        </div>
+      `;
+    }
+    return `
+      <div class="sidebar-card">
+        <div class="sidebar-section-title">Build Flow</div>
+        <ol class="sidebar-steps">
+          <li>Select one or more workers.</li>
+          <li>Read the command card or this sidebar for building costs and unlock age.</li>
+          <li>Click a build card, then left click the battlefield to place it.</li>
+          <li>Use Esc to cancel if you change your mind.</li>
+        </ol>
+      </div>
+    `;
+  }
+
+  private renderTutorialCard(tutorialState: NonNullable<ReturnType<typeof getTutorialState>>): HTMLDivElement {
+    const card = document.createElement("div");
+    card.className = "sidebar-card tutorial-card";
+    card.dataset.testid = "tutorial-panel";
+    const completedCount = tutorialState.steps.filter((step) => step.completed).length;
+    const items = tutorialState.steps.map((step) => `
+      <li class="${step.completed ? "tutorial-step complete" : "tutorial-step"}">${step.label}</li>
+    `).join("");
+    card.innerHTML = `
+      <div class="sidebar-label">Tutorial Objectives</div>
+      <h3 data-testid="tutorial-progress">${completedCount}/${tutorialState.steps.length} completed</h3>
+      <p class="sidebar-copy" data-testid="tutorial-current-step">${
+        tutorialState.completed
+          ? "Opening drill completed. Finish the tutorial to unlock Abbey Orchard and the Riverfolk Collective."
+          : `${tutorialState.currentStep?.label}: ${tutorialState.currentStep?.description}`
+      }</p>
+      <ol class="sidebar-steps tutorial-step-list">${items}</ol>
+    `;
+    return card;
   }
 
   private resolveFocusedAction(actions: ActionDescriptor[]): ActionDescriptor | undefined {
@@ -1065,7 +1152,7 @@ export class Hud {
     }
     const entity = selected[0];
     if (entity.kind === "unit") {
-      const definition = UNIT_DEFINITIONS[entity.unitType];
+      const definition = getFactionAdjustedUnitDefinition(this.session.getWorld().players[entity.playerId].faction, UNIT_DEFINITIONS[entity.unitType]);
       return [
         { label: "HP", value: `${Math.round(entity.hp)}/${entity.maxHp}` },
         { label: "Attack", value: `${definition.attackDamage}` },
@@ -1267,7 +1354,7 @@ export class Hud {
     player: ReturnType<GameSession["getWorld"]>["players"]["player"],
     unitType: UnitType,
   ): ActionDescriptor {
-    const definition = UNIT_DEFINITIONS[unitType];
+    const definition = getFactionAdjustedUnitDefinition(player.faction, UNIT_DEFINITIONS[unitType]);
     const unlocked = isAgeUnlocked(player.age, definition.age);
     const affordable = bagHasCost(player.resources, definition.cost);
     const queuedUnits = getPlayerQueuedUnits(this.session);
@@ -1490,7 +1577,7 @@ export class Hud {
       ) {
         continue;
       }
-      context.fillStyle = entity.playerId === "player" ? "#f1d387" : "#d16a6a";
+      context.fillStyle = toCssHex(getFactionPalette(world.players[entity.playerId].faction, entity.playerId).main);
       const x = entity.kind === "unit" ? entity.position.x : entity.tile.x;
       const y = entity.kind === "unit" ? entity.position.y : entity.tile.y;
       context.fillRect(x * tileWidth, y * tileHeight, Math.max(2, tileWidth), Math.max(2, tileHeight));

@@ -10,6 +10,9 @@ function createConfig(seed = "sim-test"): GameConfig {
     difficulty: "normal",
     e2e: true,
     mapPreset: "mossflowerMeadows",
+    playerFaction: "abbeyAlliance",
+    aiFaction: "verminRaiders",
+    scenario: "skirmish",
   };
 }
 

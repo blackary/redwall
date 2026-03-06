@@ -1,11 +1,13 @@
+import { getFactionAdjustedUnitDefinition, getFactionPopulationBonus, getFactionStartingResources } from "./factions";
 import { BUILDING_DEFINITIONS, RESEARCH_DEFINITIONS, UNIT_DEFINITIONS, isAgeUnlocked } from "./content";
-import { createMap, getResourceClusterTiles, tileIndex } from "./map";
+import { createMap, tileIndex } from "./map";
 import { buildOccupancy, findPath } from "./pathfinding";
 import type {
   Age,
   BuildingEntity,
   BuildingType,
   Entity,
+  FactionId,
   GameCommand,
   GameConfig,
   MapData,
@@ -22,7 +24,7 @@ import type {
 } from "./types";
 
 export const TICK_MS = 200;
-export const SAVE_VERSION = 1;
+export const SAVE_VERSION = 2;
 
 function cloneWorldState(world: WorldState): WorldState {
   return JSON.parse(JSON.stringify(world)) as WorldState;
@@ -32,10 +34,20 @@ function createResourceBag(food: number, timber: number, stone: number, iron: nu
   return { food, timber, stone, iron };
 }
 
-function getInitialResources(playerId: PlayerId): ResourceBag {
-  return playerId === "player"
+function getInitialResources(playerId: PlayerId, factionId: FactionId, scenario: GameConfig["scenario"]): ResourceBag {
+  const base = playerId === "player"
     ? createResourceBag(320, 360, 160, 120)
     : createResourceBag(320, 360, 180, 120);
+  const bonus = getFactionStartingResources(factionId);
+  base.food += bonus.food ?? 0;
+  base.timber += bonus.timber ?? 0;
+  base.stone += bonus.stone ?? 0;
+  base.iron += bonus.iron ?? 0;
+  if (scenario === "tutorial" && playerId === "player") {
+    base.food += 60;
+    base.timber += 80;
+  }
+  return base;
 }
 
 const AI_BUILD_LAYOUT: Partial<Record<BuildingType, TilePoint[]>> = {
@@ -197,18 +209,19 @@ export class Simulation {
   }
 
   private createInitialWorld(config: GameConfig): WorldState {
-    const map = createMap(config.seed);
+    const map = createMap(config.seed, config.mapPreset);
     const size = map.width * map.height;
     const world: WorldState = {
       seed: config.seed,
       tick: 0,
       elapsedMs: 0,
+      scenario: config.scenario,
       map,
       players: {
         player: {
           id: "player",
-          faction: "abbeyAlliance",
-          resources: getInitialResources("player"),
+          faction: config.playerFaction,
+          resources: getInitialResources("player", config.playerFaction, config.scenario),
           age: "settlement",
           populationUsed: 0,
           populationCap: 8,
@@ -222,8 +235,8 @@ export class Simulation {
         },
         ai: {
           id: "ai",
-          faction: "verminRaiders",
-          resources: getInitialResources("ai"),
+          faction: config.aiFaction,
+          resources: getInitialResources("ai", config.aiFaction, config.scenario),
           age: "settlement",
           populationUsed: 0,
           populationCap: 8,
@@ -251,7 +264,7 @@ export class Simulation {
   }
 
   private spawnResources(world: WorldState): void {
-    for (const cluster of getResourceClusterTiles()) {
+    for (const cluster of world.map.resourceClusters) {
       for (const tile of cluster.tiles) {
         const amount = cluster.type === "food" ? 220 : cluster.type === "timber" ? 320 : 260;
         const resource: ResourceEntity = {
@@ -301,7 +314,7 @@ export class Simulation {
   }
 
   private createUnit(unitType: UnitType, playerId: PlayerId, position: { x: number; y: number }): UnitEntity {
-    const definition = UNIT_DEFINITIONS[unitType];
+    const definition = this.getModifiedUnitDefinition(playerId, unitType);
     return {
       id: this.createEntityId("unit"),
       kind: "unit",
@@ -412,7 +425,7 @@ export class Simulation {
     if (!entity || entity.kind !== "building" || entity.playerId !== actor || !entity.completed) {
       return false;
     }
-    const definition = UNIT_DEFINITIONS[unitType];
+    const definition = this.getModifiedUnitDefinition(actor, unitType);
     const player = this.world.players[actor];
     if (entity.buildingType !== definition.producedAt || !isAgeUnlocked(player.age, definition.age)) {
       return false;
@@ -523,7 +536,7 @@ export class Simulation {
   }
 
   private updateAi(): void {
-    if (this.world.tick % 10 !== 0 || this.world.outcome !== "ongoing") {
+    if (this.world.scenario === "tutorial" || this.world.tick % 10 !== 0 || this.world.outcome !== "ongoing") {
       return;
     }
     const aiHall = this.getPrimaryHall("ai");
@@ -949,8 +962,8 @@ export class Simulation {
   }
 
   private getModifiedUnitDefinition(playerId: PlayerId, unitType: UnitType) {
-    const definition = UNIT_DEFINITIONS[unitType];
     const player = this.world.players[playerId];
+    const definition = getFactionAdjustedUnitDefinition(player.faction, UNIT_DEFINITIONS[unitType]);
     const attackBonus = player.research.ironforging ? 2 : 0;
     const armorBonus = player.research.leatherwork && definition.tags.some((tag) => tag === "infantry" || tag === "ranged") ? 1 : 0;
     const hareBonus = player.research.hareDrills && unitType === "hareRunner";
@@ -981,7 +994,7 @@ export class Simulation {
         }
       }
       player.populationUsed = used;
-      player.populationCap = cap || 8;
+      player.populationCap = (cap || 8) + getFactionPopulationBonus(player.faction);
     }
   }
 

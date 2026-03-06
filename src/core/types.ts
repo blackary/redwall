@@ -1,11 +1,16 @@
 export const RESOURCE_TYPES = ["food", "timber", "stone", "iron"] as const;
 export const PLAYER_IDS = ["player", "ai"] as const;
 export const AGES = ["settlement", "abbey", "warhost"] as const;
+export const MAP_PRESETS = ["mossflowerMeadows", "abbeyOrchard", "salamandastronRidge"] as const;
+export const SCENARIO_IDS = ["skirmish", "tutorial"] as const;
 
 export type ResourceType = (typeof RESOURCE_TYPES)[number];
 export type PlayerId = (typeof PLAYER_IDS)[number];
 export type Age = (typeof AGES)[number];
 export type Difficulty = "easy" | "normal" | "hard";
+export type MapPreset = (typeof MAP_PRESETS)[number];
+export type ScenarioId = (typeof SCENARIO_IDS)[number];
+export type FactionId = "abbeyAlliance" | "riverfolkCollective" | "mountainClans" | "verminRaiders";
 
 export type UnitType =
   | "worker"
@@ -60,8 +65,11 @@ export interface ResourceBag {
 
 export interface GameConfig {
   seed: number;
-  mapPreset: "mossflowerMeadows";
+  mapPreset: MapPreset;
   difficulty: Difficulty;
+  playerFaction: FactionId;
+  aiFaction: FactionId;
+  scenario: ScenarioId;
   e2e: boolean;
 }
 
@@ -179,7 +187,7 @@ export type Entity = UnitEntity | BuildingEntity | ResourceEntity;
 
 export interface PlayerState {
   id: PlayerId;
-  faction: "abbeyAlliance" | "verminRaiders";
+  faction: FactionId;
   resources: ResourceBag;
   age: Age;
   populationUsed: number;
@@ -199,17 +207,20 @@ export interface MapTile {
 }
 
 export interface MapData {
+  preset: MapPreset;
   width: number;
   height: number;
   tiles: MapTile[];
   playerSpawn: TilePoint;
   aiSpawn: TilePoint;
+  resourceClusters: Array<{ type: ResourceType; tiles: TilePoint[] }>;
 }
 
 export interface WorldState {
   seed: number;
   tick: number;
   elapsedMs: number;
+  scenario: ScenarioId;
   map: MapData;
   players: Record<PlayerId, PlayerState>;
   entities: Record<string, Entity>;
@@ -222,6 +233,10 @@ export interface SaveGameSnapshot {
   timestamp: number;
   seed: number;
   difficulty: Difficulty;
+  mapPreset: MapPreset;
+  playerFaction: FactionId;
+  aiFaction: FactionId;
+  scenario: ScenarioId;
   elapsedMs: number;
   world: WorldState;
 }
