@@ -88,4 +88,4 @@
 - Summary: Added selectable map presets, faction bonuses, persistent Chronicle progression, a guided tutorial scenario, menu-side unlock feedback, faction-aware HUD/sidebar labeling, faction-colored battlefield rendering, map/faction persistence in saves, and unit plus Playwright coverage for unlocking Abbey Orchard and the Riverfolk Collective through tutorial completion.
 - Tests run: `npm test`; `npm run test:e2e`; `npm run build`
 - Known gaps: The game now supports multiple maps, factions, and a progression loop, but it still needs more playable factions, tutorial chapters, mission-style content, and deeper faction-specific art/audio to complete the full expansion plan.
-- Commit hash: `TBD`
+- Commit hash: `50a0af5`
