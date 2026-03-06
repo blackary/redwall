@@ -100,4 +100,4 @@
 - Summary: Reworked the bottom action area into a visibly grouped Command Palette, split actions into Orders, Tasking, Construction, Training, Research, and Age Advancement sections, added explicit worker buttons for Food, Wood, Stone, and Iron assignments, and added Playwright coverage for the new palette flow.
 - Tests run: `npm test`; `npm run test:e2e`; `npm run build`
 - Known gaps: The command palette is now explicit and clickable, but follow-up work can still add deeper submenus, multi-step production tabs, and richer contextual portraits/icons for each action family.
-- Commit hash: `TBD`
+- Commit hash: `6686f1c`
