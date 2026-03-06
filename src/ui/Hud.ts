@@ -10,6 +10,7 @@ import type {
   Entity,
   ResearchId,
   ResourceBag,
+  ResourceType,
   TilePoint,
   UnitEntity,
   UnitType,
@@ -33,7 +34,7 @@ type ActionDescriptor = {
   disabledReason?: string;
   hotkeyLabel?: string;
   hotkeyCode?: string;
-  tone?: "command" | "build" | "train" | "research" | "age";
+  tone?: "command" | "task" | "build" | "train" | "research" | "age";
   categoryLabel?: string;
   description?: string;
   detailRows?: Array<{ label: string; value: string }>;
@@ -96,6 +97,21 @@ function formatCost(cost?: Partial<ResourceBag>): string {
 function formatFootprint(buildingType: BuildingType): string {
   const footprint = BUILDING_DEFINITIONS[buildingType].footprint;
   return `${footprint.x}x${footprint.y}`;
+}
+
+function formatResourceLabel(resourceType: ResourceType): string {
+  switch (resourceType) {
+    case "food":
+      return "Food";
+    case "timber":
+      return "Wood";
+    case "stone":
+      return "Stone";
+    case "iron":
+      return "Iron";
+    default:
+      return formatLabel(resourceType);
+  }
 }
 
 function bagHasCost(bag: ResourceBag, cost: Partial<ResourceBag>): boolean {
@@ -360,7 +376,7 @@ export class Hud {
         </div>
         <div class="panel dock-panel action-panel">
           <div class="dock-header">
-            <div class="panel-heading">Command Card</div>
+            <div class="panel-heading">Command Palette</div>
             <span class="dock-kicker" data-testid="queue-summary">Select a unit or building</span>
           </div>
           <div class="queue-panel" data-testid="queue-panel"></div>
@@ -488,11 +504,11 @@ export class Hud {
     if (selected.length === 0) {
       this.selectionHost.innerHTML = `
         <div class="selection-empty">
-          <div class="selection-title">${faction.label} Command</div>
-          <p class="hint">${
+            <div class="selection-title">${faction.label} Command</div>
+            <p class="hint">${
             world.scenario === "tutorial"
               ? "Follow the objective list in the right sidebar to learn the core opening sequence."
-              : `${faction.shortBonus} Open with workers, add dormitories early, and keep production running through Abbey Age.`
+              : `${faction.shortBonus} Use the Command Palette below to issue orders, assign worker jobs, and open construction and production groups.`
           }</p>
         </div>
       `;
@@ -593,15 +609,15 @@ export class Hud {
       const workerPresent = selected.some((entity) => entity.kind === "unit" && UNIT_DEFINITIONS[entity.unitType].tags.includes("worker"));
       return workerPresent
         ? "Mixed group selected. Command cards include movement plus worker construction."
-        : "Troop group selected. Use the command card or right click to move, patrol, and stop.";
+        : "Troop group selected. Use the Command Palette or right click to move, patrol, and stop.";
     }
     const single = selected[0];
     if (single.kind === "unit") {
       return UNIT_DEFINITIONS[single.unitType].tags.includes("worker")
-        ? "Workers can build from the command card and gather with right click or the Gather card."
-        : "Troops respond best to right click context orders or Patrol from the command card.";
+        ? "Workers use the Command Palette below. Tasking buttons auto-assign resources, and Construction buttons arm building placement."
+        : "Troops respond best to right click context orders or Patrol from the Command Palette.";
     }
-    return "Production buildings show queue progress here. Use the command card to train, research, and set rally points.";
+    return "Production buildings show queue progress here. Use the Command Palette to train, research, and set rally points.";
   }
 
   private renderActionsPanel(signature: string, actions: ActionDescriptor[]): void {
@@ -610,20 +626,44 @@ export class Hud {
     }
 
     this.actionsHost.innerHTML = "";
-    this.actionsHost.className = "command-grid";
+    this.actionsHost.className = "command-palette";
     if (actions.length === 0) {
       this.actionsHost.innerHTML = `
         <div class="action-empty">
-          <strong>Command Card</strong>
-          <span>Select a worker, troop, or building to open classic RTS actions and hotkeys.</span>
+          <strong>Command Palette</strong>
+          <span>Select a worker, troop, or building to open grouped order, task, build, training, and research buttons.</span>
         </div>
       `;
       this.lastActionSignature = signature;
       return;
     }
 
+    const groups = new Map<string, ActionDescriptor[]>();
     for (const action of actions) {
-      this.actionsHost.append(this.createActionButton(action));
+      const group = action.categoryLabel ?? "Commands";
+      if (!groups.has(group)) {
+        groups.set(group, []);
+      }
+      groups.get(group)?.push(action);
+    }
+
+    for (const [groupLabel, groupActions] of groups) {
+      const section = document.createElement("section");
+      section.className = "palette-section";
+      section.dataset.testid = `palette-${groupLabel.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
+      section.innerHTML = `
+        <div class="palette-header">
+          <span class="palette-title">${groupLabel}</span>
+          <span class="palette-count">${groupActions.length}</span>
+        </div>
+      `;
+      const grid = document.createElement("div");
+      grid.className = "command-grid palette-grid";
+      for (const action of groupActions) {
+        grid.append(this.createActionButton(action));
+      }
+      section.append(grid);
+      this.actionsHost.append(section);
     }
     this.lastActionSignature = signature;
   }
@@ -896,7 +936,7 @@ export class Hud {
       note.className = "queue-entry";
       note.innerHTML = `
         <div class="queue-entry-title">Command Tips</div>
-        <div class="queue-entry-meta">Double-click troops for same-type selection. Click the minimap to snap the camera. Use QWER / ASDF / ZXCV on the command card.</div>
+        <div class="queue-entry-meta">Double-click troops for same-type selection. Click the minimap to snap the camera. Use QWER / ASDF / ZXCV on the Command Palette.</div>
       `;
       this.queueHost.append(note);
       return;
@@ -922,7 +962,7 @@ export class Hud {
       note.className = "queue-entry";
       note.innerHTML = `
         <div class="queue-entry-title">Queue Empty</div>
-        <div class="queue-entry-meta">Set a rally point or start training from the command card. Current rally: ${building.rallyPoint.x}, ${building.rallyPoint.y}</div>
+        <div class="queue-entry-meta">Set a rally point or start training from the Command Palette. Current rally: ${building.rallyPoint.x}, ${building.rallyPoint.y}</div>
       `;
       this.queueHost.append(note);
       return;
@@ -966,7 +1006,7 @@ export class Hud {
             <h3 data-testid="sidebar-title">${playerFaction.label} Advisor</h3>
             <p class="sidebar-copy" data-testid="sidebar-summary">${
               world.scenario === "tutorial"
-                ? "The guided drill is active. Select a worker, follow the objective list below, and use the command card to learn the opening flow."
+                ? "The guided drill is active. Select a worker, follow the objective list below, and use the Command Palette to learn the opening flow."
                 : `Select a worker to open the full building list, or select a production building to see ${playerFaction.label} training, upgrade, and age-up requirements in detail.`
             }</p>
           </div>
@@ -991,7 +1031,7 @@ export class Hud {
         ? `Build mode is armed for ${BUILDING_DEFINITIONS[sessionState.buildMode].label}.`
         : sessionState.commandMode
           ? `${this.getCommandLabel()} is armed.`
-          : "Hover or focus a command card to inspect it here.");
+          : "Hover or focus a Command Palette button to inspect it here.");
 
     const sidebar = document.createElement("div");
     sidebar.className = "sidebar-shell";
@@ -1086,7 +1126,7 @@ export class Hud {
         <div class="sidebar-section-title">Build Flow</div>
         <ol class="sidebar-steps">
           <li>Select one or more workers.</li>
-          <li>Read the command card or this sidebar for building costs and unlock age.</li>
+          <li>Read the Command Palette or this sidebar for building costs and unlock age.</li>
           <li>Click a build card, then left click the battlefield to place it.</li>
           <li>Use Esc to cancel if you change your mind.</li>
         </ol>
@@ -1251,6 +1291,14 @@ export class Hud {
     );
 
     if (hasWorkers) {
+      const workerUnits = units.filter((unit) => UNIT_DEFINITIONS[unit.unitType].tags.includes("worker"));
+      actions.push(
+        this.createTaskingAction(workerUnits, "food", "Forage", "Sends the selected workers to the nearest food patch."),
+        this.createTaskingAction(workerUnits, "timber", "Lumber", "Sends the selected workers to the nearest timber stand."),
+        this.createTaskingAction(workerUnits, "stone", "Quarry", "Sends the selected workers to the nearest stone outcrop."),
+        this.createTaskingAction(workerUnits, "iron", "Mine", "Sends the selected workers to the nearest iron seam."),
+      );
+
       const buildingOptions: BuildingType[] = [
         "dormitory",
         "storehouse",
@@ -1290,6 +1338,62 @@ export class Hud {
     }
 
     return this.assignGridHotkeys(actions);
+  }
+
+  private createTaskingAction(
+    workers: UnitEntity[],
+    resourceType: ResourceType,
+    label: string,
+    description: string,
+  ): ActionDescriptor {
+    const targetId = this.findNearestResourceTarget(workers, resourceType);
+    return {
+      label,
+      testId: `action-task-${resourceType}`,
+      action: () => {
+        const currentTarget = this.findNearestResourceTarget(workers, resourceType);
+        if (!currentTarget) {
+          return;
+        }
+        this.session.issueCommand({
+          type: "gather",
+          unitIds: workers.map((worker) => worker.id),
+          targetId: currentTarget,
+        });
+      },
+      detail: `Nearest ${formatResourceLabel(resourceType)}`,
+      disabled: !targetId,
+      disabledReason: !targetId ? `No ${formatResourceLabel(resourceType).toLowerCase()} node is currently available.` : undefined,
+      tone: "task",
+      categoryLabel: "Tasking",
+      description,
+      detailRows: [
+        { label: "Target", value: formatResourceLabel(resourceType) },
+        { label: "Use", value: "Direct task button" },
+      ],
+    };
+  }
+
+  private findNearestResourceTarget(workers: UnitEntity[], resourceType: ResourceType): string | undefined {
+    if (workers.length === 0) {
+      return undefined;
+    }
+    let bestId: string | undefined;
+    let bestDistance = Number.POSITIVE_INFINITY;
+    for (const entity of Object.values(this.session.getWorld().entities)) {
+      if (entity.kind !== "resource" || entity.resourceType !== resourceType || entity.amount <= 0) {
+        continue;
+      }
+      const distance = workers.reduce((closest, worker) => {
+        const currentDistance = Math.hypot(entity.tile.x - worker.position.x, entity.tile.y - worker.position.y);
+        return Math.min(closest, currentDistance);
+      }, Number.POSITIVE_INFINITY);
+      if (distance < bestDistance) {
+        bestDistance = distance;
+        bestId = entity.id;
+      }
+    }
+    return bestId;
   }
 
   private appendBuildingActions(
@@ -1476,7 +1580,7 @@ export class Hud {
 
   private createActionButton(action: ActionDescriptor): HTMLButtonElement {
     const button = document.createElement("button");
-    button.className = `action-button${action.tone ? ` action-${action.tone}` : ""}`;
+	    button.className = `action-button${action.tone ? ` action-${action.tone}` : ""}`;
     button.dataset.testid = action.testId;
     button.disabled = Boolean(action.disabled);
     if (action.disabledReason) {

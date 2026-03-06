@@ -742,6 +742,39 @@ select {
   color: #c7bc9f;
 }
 
+.command-palette {
+  display: grid;
+  gap: 10px;
+}
+
+.palette-section {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.035);
+  border: 1px solid rgba(232, 215, 173, 0.08);
+}
+
+.palette-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.palette-title {
+  font-size: 0.78rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: #d9ba73;
+}
+
+.palette-count {
+  font-size: 0.78rem;
+  color: #c7bc9f;
+}
+
 .command-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -760,6 +793,10 @@ select {
 
 .action-command {
   background: linear-gradient(180deg, rgba(91, 123, 131, 0.2), rgba(255, 255, 255, 0.04));
+}
+
+.action-task {
+  background: linear-gradient(180deg, rgba(93, 116, 69, 0.28), rgba(255, 255, 255, 0.04));
 }
 
 .action-build {

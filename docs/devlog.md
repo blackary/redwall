@@ -94,4 +94,10 @@
 - Summary: Added a pause hook to the debug surface so save/resume assertions can freeze the sim at the saved frame, and tightened the animation-state Playwright test to verify harvesting motion over time instead of relying on a single peak-swing sample that could miss on slower CI runners.
 - Tests run: `npm test`; `npm run test:e2e`; `npm run build`
 - Known gaps: CI is stabilized for the current suite, but future test additions should keep preferring deterministic state transitions over timing-sensitive frame sampling where possible.
+- Commit hash: `0287801`
+
+## 2026-03-06 Command Palette and Worker Tasking
+- Summary: Reworked the bottom action area into a visibly grouped Command Palette, split actions into Orders, Tasking, Construction, Training, Research, and Age Advancement sections, added explicit worker buttons for Food, Wood, Stone, and Iron assignments, and added Playwright coverage for the new palette flow.
+- Tests run: `npm test`; `npm run test:e2e`; `npm run build`
+- Known gaps: The command palette is now explicit and clickable, but follow-up work can still add deeper submenus, multi-step production tabs, and richer contextual portraits/icons for each action family.
 - Commit hash: `TBD`
