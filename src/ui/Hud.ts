@@ -32,6 +32,9 @@ type ActionDescriptor = {
   hotkeyLabel?: string;
   hotkeyCode?: string;
   tone?: "command" | "build" | "train" | "research" | "age";
+  categoryLabel?: string;
+  description?: string;
+  detailRows?: Array<{ label: string; value: string }>;
 };
 
 const ACTION_GRID_HOTKEYS = [
@@ -86,6 +89,11 @@ function formatCost(cost?: Partial<ResourceBag>): string {
     parts.push(`${cost.iron}I`);
   }
   return parts.join(" ");
+}
+
+function formatFootprint(buildingType: BuildingType): string {
+  const footprint = BUILDING_DEFINITIONS[buildingType].footprint;
+  return `${footprint.x}x${footprint.y}`;
 }
 
 function bagHasCost(bag: ResourceBag, cost: Partial<ResourceBag>): boolean {
@@ -177,6 +185,68 @@ function getPlayerQueuedUnits(session: GameSession): number {
     .reduce((total, entity) => total + entity.queue.filter((item) => item.kind === "unit").length, 0);
 }
 
+function getUnitDescription(unitType: UnitType): string {
+  switch (unitType) {
+    case "worker":
+      return "Economic unit for gathering, hauling, and constructing the Abbey frontier.";
+    case "shrewScout":
+      return "Fast scouting beast with wide sight and quick response around the map.";
+    case "militia":
+      return "Basic melee line-holder for the first fights around your economy.";
+    case "shieldbearer":
+      return "Durable infantry that absorbs punishment and anchors the front line.";
+    case "slinger":
+      return "Low-cost ranged support for early volleys and skirmishes.";
+    case "archer":
+      return "Longer-range ranged unit for focused pressure and defense.";
+    case "otterSkirmisher":
+      return "Mobile warhost ranged unit with a stronger combat profile than early archers.";
+    case "hareRunner":
+      return "Fast striking infantry for raids, flanks, and quick reinforcement.";
+    case "badgerChampion":
+      return "Heavy elite bruiser meant to smash through late-game positions.";
+    case "ramCart":
+      return "Siege engine for bringing down towers, halls, and fortified lines.";
+    default:
+      return "Abbey alliance troop.";
+  }
+}
+
+function getBuildingDescription(buildingType: BuildingType): string {
+  switch (buildingType) {
+    case "dormitory":
+      return "Expands population room so the Abbey can support a larger host.";
+    case "storehouse":
+      return "Resource drop-off for timber, stone, and iron near outlying gather lines.";
+    case "granary":
+      return "Food drop-off and early eco upgrade site for a stable opening.";
+    case "barracks":
+      return "Primary military hall for melee troops and your first proper army.";
+    case "range":
+      return "Ranged production building unlocked in Abbey Age.";
+    case "blacksmith":
+      return "Upgrade hall for armor, damage, and tower improvements.";
+    case "longPatrolLodge":
+      return "Late-game military building for hares and badger champions.";
+    case "tower":
+      return "Static defense for protecting gatherers and controlling approaches.";
+    case "wall":
+      return "Cheap fortification piece for shaping battles and slowing raids.";
+    case "gate":
+      return "Passable wall segment that preserves your own movement lanes.";
+    case "workshop":
+      return "Siege production building for ram carts in the late game.";
+    case "abbeyHall":
+      return "Town center equivalent for villagers, scouts, and age advancement.";
+    default:
+      return "Abbey alliance structure.";
+  }
+}
+
+function getResearchDescription(researchId: ResearchId): string {
+  return RESEARCH_DEFINITIONS[researchId].grants.join(" ");
+}
+
 interface HudOptions {
   settings: GameSettings;
   onSaveAndExit: () => Promise<unknown> | void;
@@ -195,6 +265,7 @@ export class Hud {
   private readonly actionsHost: HTMLDivElement;
   private readonly queueHost: HTMLDivElement;
   private readonly queueSummaryHost: HTMLSpanElement;
+  private readonly sidebarHost: HTMLDivElement;
   private readonly selectionHost: HTMLDivElement;
   private readonly selectionRosterHost: HTMLDivElement;
   private readonly selectionCountLabel: HTMLSpanElement;
@@ -215,6 +286,7 @@ export class Hud {
   private readonly unsubscribe: () => void;
   private settings: GameSettings;
   private lastActionSignature = "";
+  private actionFocusId?: string;
 
   public constructor(session: GameSession, root: HTMLDivElement, options: HudOptions) {
     this.session = session;
@@ -256,6 +328,7 @@ export class Hud {
           </div>
         </div>
       </section>
+      <aside class="panel hud-sidebar" data-testid="hud-sidebar"></aside>
       <section class="hud-dock">
         <div class="panel dock-panel minimap-panel">
           <div class="dock-header">
@@ -293,6 +366,7 @@ export class Hud {
     this.actionsHost = this.root.querySelector("[data-testid='action-panel']") as HTMLDivElement;
     this.queueHost = this.root.querySelector("[data-testid='queue-panel']") as HTMLDivElement;
     this.queueSummaryHost = this.root.querySelector("[data-testid='queue-summary']") as HTMLSpanElement;
+    this.sidebarHost = this.root.querySelector("[data-testid='hud-sidebar']") as HTMLDivElement;
     this.selectionHost = this.root.querySelector("[data-testid='selection-panel']") as HTMLDivElement;
     this.selectionRosterHost = this.root.querySelector("[data-testid='selection-roster']") as HTMLDivElement;
     this.selectionCountLabel = this.root.querySelector("[data-testid='selection-count']") as HTMLSpanElement;
@@ -417,6 +491,7 @@ export class Hud {
     const actionSignature = this.getActionSignature(selected, player, actions);
     this.renderActionsPanel(actionSignature, actions);
     this.renderQueuePanel(selected);
+    this.renderSidebar(selected, actions);
     this.drawMinimap();
   }
 
@@ -836,6 +911,180 @@ export class Hud {
     });
   }
 
+  private renderSidebar(selected: Entity[], actions: ActionDescriptor[]): void {
+    const focusedAction = this.resolveFocusedAction(actions);
+    const sessionState = this.session.getSessionState();
+    const selectedEntity = selected.length === 1 ? selected[0] : undefined;
+
+    if (selected.length === 0 && !sessionState.buildMode && !sessionState.commandMode) {
+      this.sidebarHost.innerHTML = `
+        <div class="sidebar-shell">
+          <div class="sidebar-header">
+            <div class="panel-heading">Right Sidebar</div>
+            <span class="dock-kicker">Field Manual</span>
+          </div>
+          <div class="sidebar-card">
+            <h3 data-testid="sidebar-title">Abbey Advisor</h3>
+            <p class="sidebar-copy" data-testid="sidebar-summary">Select a worker to open the full building list, or select a production building to see training, upgrade, and age-up requirements in detail.</p>
+          </div>
+          <div class="sidebar-card">
+            <div class="sidebar-section-title">Build Flow</div>
+            <ol class="sidebar-steps">
+              <li>Select one or more workers.</li>
+              <li>Read the command card or this sidebar for building costs and unlock age.</li>
+              <li>Click a build card, then left click the battlefield to place it.</li>
+              <li>Use Esc to cancel if you change your mind.</li>
+            </ol>
+          </div>
+        </div>
+      `;
+      return;
+    }
+
+    const selectionTitle = selected.length > 1
+      ? `${selected.length} Units Selected`
+      : selectedEntity?.kind === "unit"
+        ? UNIT_DEFINITIONS[selectedEntity.unitType].label
+        : selectedEntity?.kind === "building"
+          ? BUILDING_DEFINITIONS[selectedEntity.buildingType].label
+          : selectedEntity
+            ? formatLabel(selectedEntity.resourceType)
+            : "Selection";
+    const selectionSummary = this.getContextHint(selected);
+    const selectedActionSummary = focusedAction?.description
+      ?? (sessionState.buildMode
+        ? `Build mode is armed for ${BUILDING_DEFINITIONS[sessionState.buildMode].label}.`
+        : sessionState.commandMode
+          ? `${this.getCommandLabel()} is armed.`
+          : "Hover or focus a command card to inspect it here.");
+
+    const sidebar = document.createElement("div");
+    sidebar.className = "sidebar-shell";
+    sidebar.innerHTML = `
+      <div class="sidebar-header">
+        <div class="panel-heading">Right Sidebar</div>
+        <span class="dock-kicker">${focusedAction?.categoryLabel ?? "Selection Detail"}</span>
+      </div>
+      <div class="sidebar-card">
+        <div class="sidebar-label">Current Selection</div>
+        <h3 data-testid="sidebar-title">${selectionTitle}</h3>
+        <p class="sidebar-copy" data-testid="sidebar-summary">${selectionSummary}</p>
+      </div>
+      <div class="sidebar-card">
+        <div class="sidebar-label">Current Task</div>
+        <h3 data-testid="sidebar-action-title">${focusedAction?.label ?? this.getCommandLabel()}</h3>
+        <p class="sidebar-copy" data-testid="sidebar-action-summary">${selectedActionSummary}</p>
+        <div class="sidebar-meta" data-testid="sidebar-action-meta"></div>
+        <p class="sidebar-status" data-testid="sidebar-status"></p>
+      </div>
+      <div class="sidebar-card">
+        <div class="sidebar-label">Available Now</div>
+        <div class="sidebar-action-list" data-testid="sidebar-action-list"></div>
+      </div>
+    `;
+    this.sidebarHost.innerHTML = "";
+    this.sidebarHost.append(sidebar);
+
+    const metaHost = this.sidebarHost.querySelector("[data-testid='sidebar-action-meta']") as HTMLDivElement;
+    const statusHost = this.sidebarHost.querySelector("[data-testid='sidebar-status']") as HTMLParagraphElement;
+    const actionListHost = this.sidebarHost.querySelector("[data-testid='sidebar-action-list']") as HTMLDivElement;
+
+    const rows = focusedAction?.detailRows ?? this.getSelectionDetailRows(selected);
+    for (const row of rows) {
+      const item = document.createElement("div");
+      item.className = "sidebar-meta-row";
+      item.innerHTML = `<span>${row.label}</span><strong>${row.value}</strong>`;
+      metaHost.append(item);
+    }
+
+    statusHost.textContent = focusedAction?.disabledReason
+      ? `Unavailable: ${focusedAction.disabledReason}`
+      : sessionState.buildMode && focusedAction?.tone === "build"
+        ? "Placement armed: left click the battlefield to place this structure."
+        : sessionState.commandMode && focusedAction?.tone === "command"
+          ? "Command armed: left click the battlefield to issue this order."
+          : focusedAction
+            ? "Ready now."
+            : "Inspect the options below to plan the next step.";
+
+    const previewActions = actions.length > 0 ? actions.slice(0, 6) : [];
+    for (const action of previewActions) {
+      const button = document.createElement("button");
+      button.className = `sidebar-action-chip${focusedAction?.testId === action.testId ? " active" : ""}`;
+      button.dataset.testid = `sidebar-chip-${action.testId}`;
+      button.innerHTML = `
+        <span>${action.label}</span>
+        <strong>${action.hotkeyLabel ?? "-"}</strong>
+      `;
+      button.addEventListener("click", () => {
+        this.actionFocusId = action.testId;
+        this.renderSidebar(selected, actions);
+      });
+      actionListHost.append(button);
+    }
+
+    if (previewActions.length === 0) {
+      actionListHost.innerHTML = `<p class="sidebar-copy">No direct actions are available for this selection yet.</p>`;
+    }
+  }
+
+  private resolveFocusedAction(actions: ActionDescriptor[]): ActionDescriptor | undefined {
+    if (actions.length === 0) {
+      this.actionFocusId = undefined;
+      return undefined;
+    }
+    const sessionState = this.session.getSessionState();
+    const preferredId = this.actionFocusId
+      ?? (sessionState.buildMode ? `action-build-${sessionState.buildMode}` : undefined)
+      ?? (sessionState.commandMode === "move"
+        ? "action-mode-move"
+        : sessionState.commandMode === "gather"
+          ? "action-mode-gather"
+          : sessionState.commandMode === "attack"
+            ? "action-mode-attack"
+            : sessionState.commandMode === "rally"
+              ? "action-mode-rally"
+              : undefined);
+    const explicit = preferredId ? actions.find((action) => action.testId === preferredId) : undefined;
+    if (explicit) {
+      this.actionFocusId = explicit.testId;
+      return explicit;
+    }
+    const defaultAction = actions.find((action) => !action.disabled && action.tone === "build")
+      ?? actions.find((action) => !action.disabled && action.tone === "train")
+      ?? actions.find((action) => !action.disabled && action.tone === "research")
+      ?? actions.find((action) => !action.disabled)
+      ?? actions[0];
+    this.actionFocusId = defaultAction.testId;
+    return defaultAction;
+  }
+
+  private getSelectionDetailRows(selected: Entity[]): Array<{ label: string; value: string }> {
+    if (selected.length !== 1) {
+      return [{ label: "Units", value: `${selected.length}` }];
+    }
+    const entity = selected[0];
+    if (entity.kind === "unit") {
+      const definition = UNIT_DEFINITIONS[entity.unitType];
+      return [
+        { label: "HP", value: `${Math.round(entity.hp)}/${entity.maxHp}` },
+        { label: "Attack", value: `${definition.attackDamage}` },
+        { label: "Armor", value: `${definition.armor ?? 0}` },
+        { label: "Speed", value: `${definition.speed.toFixed(2)}` },
+      ];
+    }
+    if (entity.kind === "building") {
+      const definition = BUILDING_DEFINITIONS[entity.buildingType];
+      return [
+        { label: "HP", value: `${Math.round(entity.hp)}/${entity.maxHp}` },
+        { label: "Size", value: formatFootprint(entity.buildingType) },
+        { label: "Queue", value: `${entity.queue.length}` },
+        { label: "Age", value: formatAge(definition.age) },
+      ];
+    }
+    return [{ label: "Remaining", value: `${entity.amount}` }];
+  }
+
   private getAvailableActions(selected: Entity[]): ActionDescriptor[] {
     const player = this.session.getWorld().players.player;
     const actions: ActionDescriptor[] = [];
@@ -862,6 +1111,12 @@ export class Hud {
         action: () => this.session.setCommandMode("move"),
         detail: "Ground order",
         tone: "command",
+        categoryLabel: "Orders",
+        description: "Moves the selected units to a ground point without forcing attacks on the way.",
+        detailRows: [
+          { label: "Use", value: "Left click ground" },
+          { label: "Hotkey", value: "Q" },
+        ],
       },
       {
         label: "Gather",
@@ -871,6 +1126,12 @@ export class Hud {
         disabled: !hasWorkers,
         disabledReason: !hasWorkers ? "Only workers can gather resources." : undefined,
         tone: "command",
+        categoryLabel: "Orders",
+        description: "Orders selected workers to gather from a resource node and return it to the nearest drop-off.",
+        detailRows: [
+          { label: "Use", value: "Left click resource" },
+          { label: "Hotkey", value: "W" },
+        ],
       },
       {
         label: "Patrol",
@@ -878,6 +1139,12 @@ export class Hud {
         action: () => this.session.setCommandMode("attack"),
         detail: "Attack move",
         tone: "command",
+        categoryLabel: "Orders",
+        description: "Attack-moves the selected troops toward a destination and engages enemies encountered on the route.",
+        detailRows: [
+          { label: "Use", value: "Left click ground or enemy" },
+          { label: "Hotkey", value: "E" },
+        ],
       },
       {
         label: "Stop",
@@ -887,6 +1154,12 @@ export class Hud {
         },
         detail: "Cancel orders",
         tone: "command",
+        categoryLabel: "Orders",
+        description: "Clears the current orders so the selected units return to an idle state.",
+        detailRows: [
+          { label: "Use", value: "Instant" },
+          { label: "Hotkey", value: "R" },
+        ],
       },
     );
 
@@ -917,6 +1190,14 @@ export class Hud {
           disabled: !unlocked || !affordable,
           disabledReason: !unlocked ? `${definition.label} unlocks in ${formatAge(definition.age)}.` : !affordable ? "Not enough resources." : undefined,
           tone: "build",
+          categoryLabel: "Construction",
+          description: getBuildingDescription(buildingType),
+          detailRows: [
+            { label: "Cost", value: formatCost(definition.cost) || "Free" },
+            { label: "Build", value: formatDuration(definition.buildTimeMs) },
+            { label: "Age", value: formatAge(definition.age) },
+            { label: "Size", value: formatFootprint(buildingType) },
+          ],
         });
       }
     }
@@ -939,6 +1220,12 @@ export class Hud {
       action: () => this.session.setCommandMode("rally"),
       detail: `${building.rallyPoint.x}, ${building.rallyPoint.y}`,
       tone: "command",
+      categoryLabel: "Orders",
+      description: "Changes where freshly trained units leave the building and head after spawning.",
+      detailRows: [
+        { label: "Rally", value: `${building.rallyPoint.x}, ${building.rallyPoint.y}` },
+        { label: "Hotkey", value: "Q" },
+      ],
     });
 
     if (building.buildingType === "abbeyHall") {
@@ -1002,6 +1289,14 @@ export class Hud {
             ? "Need more population room."
             : undefined,
       tone: "train",
+      categoryLabel: "Training",
+      description: getUnitDescription(unitType),
+      detailRows: [
+        { label: "Cost", value: formatCost(definition.cost) || "Free" },
+        { label: "Train", value: formatDuration(definition.trainTimeMs) },
+        { label: "HP", value: `${definition.hp}` },
+        { label: "Attack", value: `${definition.attackDamage}` },
+      ],
     };
   }
 
@@ -1034,6 +1329,14 @@ export class Hud {
               ? "Not enough resources."
               : undefined,
       tone: "research",
+      categoryLabel: "Research",
+      description: getResearchDescription(researchId),
+      detailRows: [
+        { label: "Cost", value: formatCost(definition.cost) || "Free" },
+        { label: "Time", value: formatDuration(definition.researchTimeMs) },
+        { label: "Age", value: formatAge(definition.age) },
+        { label: "Site", value: BUILDING_DEFINITIONS[building.buildingType].label },
+      ],
     };
   }
 
@@ -1064,6 +1367,14 @@ export class Hud {
             ? "Not enough resources."
             : undefined,
       tone: "age",
+      categoryLabel: "Age Advancement",
+      description: definition.grants.join(" "),
+      detailRows: [
+        { label: "Cost", value: formatCost(definition.cost) || "Free" },
+        { label: "Time", value: formatDuration(definition.researchTimeMs) },
+        { label: "Next Age", value: formatAge(nextAge) },
+        { label: "Hall", value: BUILDING_DEFINITIONS[building.buildingType].label },
+      ],
     };
   }
 
@@ -1094,7 +1405,16 @@ export class Hud {
         <span class="action-cost">${formatCost(action.cost)}</span>
       </span>
     `;
-    button.addEventListener("click", action.action);
+    const syncSidebarFocus = () => {
+      this.actionFocusId = action.testId;
+      this.renderSidebar(this.session.getSelectedEntities(), this.getAvailableActions(this.session.getSelectedEntities()));
+    };
+    button.addEventListener("mouseenter", syncSidebarFocus);
+    button.addEventListener("focus", syncSidebarFocus);
+    button.addEventListener("click", () => {
+      syncSidebarFocus();
+      action.action();
+    });
     return button;
   }
 
