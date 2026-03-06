@@ -77,3 +77,9 @@
 - Tests run: `npm test`; `npm run test:e2e`; `npm run build`
 - Known gaps: Box selection now behaves correctly around mixed unit/building clusters, but precise click-picking on dense overlapping sprites can still be tuned further in a future input pass.
 - Commit hash: `7367747`
+
+## 2026-03-06 Battlefield Animation Pass
+- Summary: Added real frame-time unit poses for marching, harvesting, building, carrying, and attacking; animated weapon/tool motion and work/combat effects; added projectile trails, hit flashes, and subtle building activity animation; and exposed render animation state through the debug surface with dedicated render and Playwright coverage.
+- Tests run: `npm test`; `npm run test:e2e`; `npm run build`
+- Known gaps: Units now visibly work, march, and fight instead of sliding as static tokens, but a future pass could still add sprite-atlas animation, more directional facing, and richer death/impact effects.
+- Commit hash: `ae0ba70`
