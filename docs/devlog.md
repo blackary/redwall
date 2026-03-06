@@ -34,4 +34,4 @@
 - Summary: Added persistent grid/reduced-motion settings in both menu and HUD, added explicit save-and-exit flow back to the resumable menu, fixed new-match versus resume config selection, cleaned up HUD key listener lifecycle, and hardened the Pages workflow to run unit and Playwright coverage before publishing `dist/`.
 - Tests run: `npm test`; `npm run test:e2e -- tests/e2e/bootstrap.spec.ts tests/e2e/economy-resume.spec.ts tests/e2e/skirmish-ai.spec.ts tests/e2e/settings.spec.ts`; `npm run build`
 - Known gaps: The main bundle is still large because Phaser remains in the primary chunk; deploy is now verified, but bundle splitting is still worth doing.
-- Commit hash: pending
+- Commit hash: `6de67ec`
