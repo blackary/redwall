@@ -71,3 +71,9 @@
 - Tests run: `npm test`; `npm run test:e2e`; `npm run build`
 - Known gaps: The sidebar now makes build and production flow legible again, but the next usability pass should add stronger portrait/icon identity and more advanced queue management interactions.
 - Commit hash: `50bc4ee`
+
+## 2026-03-06 Mixed Box Selection Fix
+- Summary: Reworked drag selection to use the real screen-space marquee instead of snapped tile corners, restored box selection when units are dragged together with nearby buildings, added unit-first mixed-selection behavior so workers near the abbey hall remain selectable, and widened Vitest coverage to include render-side selection helpers.
+- Tests run: `npm test`; `npm run test:e2e`; `npm run build`
+- Known gaps: Box selection now behaves correctly around mixed unit/building clusters, but precise click-picking on dense overlapping sprites can still be tuned further in a future input pass.
+- Commit hash: `7367747`
