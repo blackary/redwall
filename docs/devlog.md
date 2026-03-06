@@ -47,3 +47,9 @@
 - Tests run: `npm test`; `npm run test:e2e -- tests/e2e/bootstrap.spec.ts tests/e2e/economy-resume.spec.ts tests/e2e/skirmish-ai.spec.ts tests/e2e/settings.spec.ts tests/e2e/production-progress.spec.ts tests/e2e/match-flow.spec.ts`; `npm run build`
 - Known gaps: Phaser still ships as a large deferred chunk, so initial menu load is lighter now but there is still room for deeper engine chunking or asset-atlas optimization later.
 - Commit hash: `141b110`
+
+## 2026-03-06 CI Follow-up
+- Summary: Stopped the session tick loop after victory or defeat so match-end overlays stay stable under GitHub Actions timing and no longer recreate their buttons while the Playwright runner is trying to click them.
+- Tests run: `npm test`; `npm run test:e2e -- tests/e2e/bootstrap.spec.ts tests/e2e/economy-resume.spec.ts tests/e2e/skirmish-ai.spec.ts tests/e2e/settings.spec.ts tests/e2e/production-progress.spec.ts tests/e2e/match-flow.spec.ts`; `npm run build`
+- Known gaps: The remote per-push deploy run still needs to be re-checked after this follow-up commit lands.
+- Commit hash: pending

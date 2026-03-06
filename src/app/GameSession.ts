@@ -178,7 +178,7 @@ export class GameSession {
     const delta = Math.min(64, timestamp - this.lastFrameMs);
     this.lastFrameMs = timestamp;
     let changed = false;
-    if (!this.sessionState.paused) {
+    if (!this.sessionState.paused && this.getWorld().outcome === "ongoing") {
       this.accumulatorMs += delta;
       while (this.accumulatorMs >= TICK_MS) {
         this.simulation.advanceTicks(1);
