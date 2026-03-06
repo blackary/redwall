@@ -2,6 +2,7 @@ import { Simulation, TICK_MS } from "../core/simulation";
 import { BUILDING_DEFINITIONS } from "../core/content";
 import type {
   BuildingType,
+  Difficulty,
   GameCommand,
   GameConfig,
   SessionState,
@@ -22,8 +23,11 @@ export class GameSession {
   private accumulatorMs = 0;
   private lastFrameMs = 0;
   private started = false;
+  private dirty = true;
+  private readonly config: GameConfig;
 
   public constructor(config: GameConfig, world?: WorldState) {
+    this.config = config;
     this.simulation = new Simulation(config, world);
   }
 
@@ -56,6 +60,26 @@ export class GameSession {
     return this.simulation.getSnapshot();
   }
 
+  public getSeed(): number {
+    return this.config.seed;
+  }
+
+  public getDifficulty(): Difficulty {
+    return this.config.difficulty;
+  }
+
+  public getElapsedMs(): number {
+    return this.getWorld().elapsedMs;
+  }
+
+  public hasUnsavedChanges(): boolean {
+    return this.dirty;
+  }
+
+  public markSaved(): void {
+    this.dirty = false;
+  }
+
   public getSessionState(): SessionState {
     return {
       selectedIds: [...this.sessionState.selectedIds],
@@ -66,6 +90,7 @@ export class GameSession {
 
   public advanceTicks(count: number): void {
     this.simulation.advanceTicks(count);
+    this.dirty = true;
     this.notify();
   }
 
@@ -75,6 +100,7 @@ export class GameSession {
       this.sessionState.buildMode = undefined;
     }
     if (handled) {
+      this.dirty = true;
       this.notify();
     }
     return handled;
@@ -135,6 +161,7 @@ export class GameSession {
       this.accumulatorMs += delta;
       while (this.accumulatorMs >= TICK_MS) {
         this.simulation.advanceTicks(1);
+        this.dirty = true;
         this.accumulatorMs -= TICK_MS;
       }
     }

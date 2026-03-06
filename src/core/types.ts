@@ -114,8 +114,8 @@ export interface BuildingDefinition {
 
 export type UnitOrder =
   | { type: "idle" }
-  | { type: "move"; destination: TilePoint; path: TilePoint[] }
-  | { type: "attackMove"; destination: TilePoint; path: TilePoint[] }
+  | { type: "move"; destination: TilePoint }
+  | { type: "attackMove"; destination: TilePoint }
   | { type: "gather"; targetId: string; phase: "toResource" | "harvest" | "toDropoff"; dropoffId?: string }
   | { type: "build"; targetId: string }
   | { type: "attack"; targetId: string }
@@ -130,6 +130,8 @@ export interface UnitEntity {
   hp: number;
   maxHp: number;
   order: UnitOrder;
+  path: TilePoint[];
+  moveTarget?: TilePoint;
   attackCooldownMs: number;
   carry?: { type: ResourceType; amount: number };
 }

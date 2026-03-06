@@ -3,19 +3,25 @@ import { GameSession } from "./GameSession";
 import { RedwallScene } from "../render/RedwallScene";
 import { Hud } from "../ui/Hud";
 import { stringToSeed } from "../core/random";
+import { createSnapshot } from "../core/save";
 import type { BuildingType, Difficulty, GameCommand, GameConfig, TilePoint, WorldState } from "../core/types";
+import { BrowserStorage, type ResumeMetadata } from "../persistence/storage";
 
 type AppMode = "menu" | "skirmish";
 
 type DebugApi = {
   getMode: () => AppMode;
   startSkirmish: () => Promise<void>;
+  continueLastMatch: () => Promise<boolean>;
   getSnapshot: () => WorldState | undefined;
   advanceTicks: (count: number) => void;
   getSelectedIds: () => string[];
   setSelection: (ids: string[]) => void;
   issueCommand: (command: GameCommand) => boolean;
   setBuildMode: (buildingType?: BuildingType) => void;
+  saveNow: () => Promise<boolean>;
+  clearSave: () => Promise<void>;
+  hasResume: () => boolean;
   getScreenPointForEntity: (id: string) => TilePoint | undefined;
   getScreenPointForTile: (tile: TilePoint) => TilePoint | undefined;
   getCameraState: () => { scrollX: number; scrollY: number; zoom: number } | undefined;
@@ -34,6 +40,9 @@ export class RedwallApp {
   private phaserGame?: Phaser.Game;
   private scene?: RedwallScene;
   private session?: GameSession;
+  private readonly storage = new BrowserStorage();
+  private resumeMeta?: ResumeMetadata;
+  private autosaveTimer = 0;
 
   public constructor(root: HTMLDivElement, search: string) {
     this.root = root;
@@ -43,6 +52,7 @@ export class RedwallApp {
       startSkirmish: async () => {
         await this.startSkirmish();
       },
+      continueLastMatch: async () => this.continueLastMatch(),
       getSnapshot: () => this.session?.getSnapshot(),
       advanceTicks: (count: number) => {
         this.session?.advanceTicks(count);
@@ -55,6 +65,13 @@ export class RedwallApp {
       setBuildMode: (buildingType?: BuildingType) => {
         this.session?.setBuildMode(buildingType);
       },
+      saveNow: async () => this.saveCurrentSession(),
+      clearSave: async () => {
+        await this.storage.clearSnapshot();
+        this.resumeMeta = undefined;
+        this.renderMenu();
+      },
+      hasResume: () => Boolean(this.resumeMeta),
       getScreenPointForEntity: (id: string) => this.scene?.getScreenPointForEntity(id),
       getScreenPointForTile: (tile: TilePoint) => this.scene?.getScreenPointForTile(tile),
       getCameraState: () => this.scene?.getCameraState(),
@@ -62,6 +79,7 @@ export class RedwallApp {
   }
 
   public start(): void {
+    this.resumeMeta = this.storage.getResumeMetadata();
     this.renderMenu();
   }
 
@@ -81,11 +99,17 @@ export class RedwallApp {
               <h2>Skirmish</h2>
               <p class="small-copy">Abbey alliance versus vermin raiders on Mossflower Meadows.</p>
               <button class="primary-button" data-testid="start-skirmish">Start Mossflower Skirmish</button>
+              <button class="secondary-button" data-testid="continue-skirmish" ${this.resumeMeta ? "" : "disabled"}>Continue Last Match</button>
               <dl class="info-grid">
                 <div><dt>Faction</dt><dd>Abbey alliance</dd></div>
                 <div><dt>Mode</dt><dd>1v1 skirmish</dd></div>
                 <div><dt>Seed</dt><dd data-testid="seed-value">${this.params.get("seed") ?? "mossflower"}</dd></div>
               </dl>
+              <p class="small-copy" data-testid="resume-status">${
+                this.resumeMeta
+                  ? `Resume available from ${new Date(this.resumeMeta.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`
+                  : "No local skirmish snapshot yet."
+              }</p>
             </section>
             <section class="status-card">
               <div class="status-row"><span>Mode</span><strong data-testid="app-mode">${this.mode}</strong></div>
@@ -100,9 +124,12 @@ export class RedwallApp {
     this.root.querySelector<HTMLButtonElement>("[data-testid='start-skirmish']")?.addEventListener("click", () => {
       void this.startSkirmish();
     });
+    this.root.querySelector<HTMLButtonElement>("[data-testid='continue-skirmish']")?.addEventListener("click", () => {
+      void this.continueLastMatch();
+    });
   }
 
-  private async startSkirmish(): Promise<void> {
+  private async startSkirmish(existingWorld?: WorldState): Promise<void> {
     this.destroyGame();
     this.mode = "skirmish";
     this.root.innerHTML = `
@@ -120,7 +147,7 @@ export class RedwallApp {
     }
 
     const config = this.buildConfig();
-    this.session = new GameSession(config);
+    this.session = new GameSession(config, existingWorld);
     this.scene = new RedwallScene(this.session);
     this.phaserGame = new Phaser.Game({
       type: Phaser.AUTO,
@@ -135,12 +162,27 @@ export class RedwallApp {
       },
     });
     new Hud(this.session, hudHost);
+    this.autosaveTimer = this.session.getElapsedMs();
+    this.session.subscribe(() => {
+      void this.handleAutosave();
+    });
     this.session.start();
   }
 
+  private async continueLastMatch(): Promise<boolean> {
+    const snapshot = await this.storage.loadSnapshot();
+    if (!snapshot) {
+      this.resumeMeta = undefined;
+      this.renderMenu();
+      return false;
+    }
+    await this.startSkirmish(snapshot.world);
+    return true;
+  }
+
   private buildConfig(): GameConfig {
-    const seedParam = this.params.get("seed") ?? "mossflower";
-    const difficulty = (this.params.get("difficulty") as Difficulty | null) ?? "normal";
+    const seedParam = this.resumeMeta?.seed?.toString() ?? this.params.get("seed") ?? "mossflower";
+    const difficulty = this.resumeMeta?.difficulty ?? (this.params.get("difficulty") as Difficulty | null) ?? "normal";
     return {
       seed: /^\d+$/.test(seedParam) ? Number(seedParam) : stringToSeed(seedParam),
       mapPreset: "mossflowerMeadows",
@@ -157,5 +199,35 @@ export class RedwallApp {
       this.phaserGame = undefined;
     }
     this.scene = undefined;
+  }
+
+  private async handleAutosave(): Promise<void> {
+    if (!this.session) {
+      return;
+    }
+    const outcome = this.session.getWorld().outcome;
+    if (outcome !== "ongoing") {
+      await this.storage.clearSnapshot();
+      this.resumeMeta = undefined;
+      return;
+    }
+    if (!this.session.hasUnsavedChanges()) {
+      return;
+    }
+    if (this.session.getElapsedMs() - this.autosaveTimer >= 15_000) {
+      await this.saveCurrentSession();
+    }
+  }
+
+  private async saveCurrentSession(): Promise<boolean> {
+    if (!this.session) {
+      return false;
+    }
+    const snapshot = createSnapshot(this.session.getSnapshot(), this.session.getDifficulty());
+    await this.storage.saveSnapshot(snapshot);
+    this.session.markSaved();
+    this.autosaveTimer = snapshot.elapsedMs;
+    this.resumeMeta = this.storage.getResumeMetadata();
+    return true;
   }
 }

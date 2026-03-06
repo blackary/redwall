@@ -33,8 +33,8 @@ function createResourceBag(food: number, timber: number, stone: number, iron: nu
 
 function getInitialResources(playerId: PlayerId): ResourceBag {
   return playerId === "player"
-    ? createResourceBag(320, 280, 160, 120)
-    : createResourceBag(320, 300, 180, 120);
+    ? createResourceBag(320, 360, 160, 120)
+    : createResourceBag(320, 360, 180, 120);
 }
 
 function createVisibility(size: number): boolean[] {
@@ -284,6 +284,8 @@ export class Simulation {
       hp: definition.hp,
       maxHp: definition.hp,
       order: { type: "idle" },
+      path: [],
+      moveTarget: undefined,
       attackCooldownMs: 0,
       carry: undefined,
     };
@@ -315,16 +317,22 @@ export class Simulation {
       }
       if (command.type === "stop") {
         entity.order = { type: "idle" };
+        entity.path = [];
+        entity.moveTarget = undefined;
         handled = true;
         continue;
       }
       if (command.type === "attack") {
         entity.order = { type: "attack", targetId: command.targetId };
+        entity.path = [];
+        entity.moveTarget = undefined;
         handled = true;
         continue;
       }
       if (command.type === "gather") {
         entity.order = { type: "gather", targetId: command.targetId, phase: "toResource" };
+        entity.path = [];
+        entity.moveTarget = undefined;
         handled = true;
         continue;
       }
@@ -354,17 +362,19 @@ export class Simulation {
         };
         this.world.entities[building.id] = building;
         entity.order = { type: "build", targetId: building.id };
+        entity.path = [];
+        entity.moveTarget = undefined;
         handled = true;
         continue;
       }
 
       const destination = command.destination;
-      const start = getUnitTile(entity);
-      const path = findPath(this.world.map, occupancy, start, destination);
       entity.order =
         command.type === "move"
-          ? { type: "move", destination, path }
-          : { type: "attackMove", destination, path };
+          ? { type: "move", destination }
+          : { type: "attackMove", destination };
+      entity.moveTarget = destination;
+      entity.path = findPath(this.world.map, occupancy, getUnitTile(entity), destination);
       handled = true;
     }
     return handled;
@@ -515,7 +525,8 @@ export class Simulation {
     if (item.kind === "unit") {
       const spawn = this.findSpawnTile(building, building.rallyPoint);
       const unit = this.createUnit(item.id as UnitType, building.playerId, { x: spawn.x + 0.25, y: spawn.y + 0.25 });
-      unit.order = { type: "move", destination: building.rallyPoint, path: [] };
+      unit.order = { type: "move", destination: building.rallyPoint };
+      unit.moveTarget = building.rallyPoint;
       this.world.entities[unit.id] = unit;
       return;
     }
@@ -593,22 +604,28 @@ export class Simulation {
     if (unit.order.type !== "move" && unit.order.type !== "attackMove") {
       return;
     }
-    if (unit.order.path.length === 0) {
-      const targetTile = unit.order.destination;
-      if (Math.abs(unit.position.x - targetTile.x) < 0.2 && Math.abs(unit.position.y - targetTile.y) < 0.2) {
-        unit.position.x = targetTile.x;
-        unit.position.y = targetTile.y;
-        unit.order = { type: "idle" };
-        return;
+    const arrived = this.moveUnitAlongPath(unit, unit.order.destination, deltaMs, occupancy);
+    if (arrived) {
+      unit.order = { type: "idle" };
+      unit.path = [];
+      unit.moveTarget = undefined;
+    }
+  }
+
+  private moveUnitAlongPath(unit: UnitEntity, destination: TilePoint, deltaMs: number, occupancy: boolean[]): boolean {
+    const targetTile = destination;
+    if (unit.path.length === 0) {
+      if (Math.abs(unit.position.x - (targetTile.x + 0.5)) < 0.3 && Math.abs(unit.position.y - (targetTile.y + 0.5)) < 0.3) {
+        unit.position.x = targetTile.x + 0.5;
+        unit.position.y = targetTile.y + 0.5;
+        return true;
       }
-      const start = getUnitTile(unit);
-      unit.order.path = findPath(this.world.map, occupancy, start, targetTile);
-      if (unit.order.path.length === 0) {
-        unit.order = { type: "idle" };
-        return;
+      unit.path = findPath(this.world.map, occupancy, getUnitTile(unit), targetTile);
+      if (unit.path.length === 0) {
+        return false;
       }
     }
-    const nextTile = unit.order.path[0];
+    const nextTile = unit.path[0];
     const target = { x: nextTile.x + 0.5, y: nextTile.y + 0.5 };
     const distance = getDistance(unit.position, target);
     const definition = UNIT_DEFINITIONS[unit.unitType];
@@ -616,11 +633,12 @@ export class Simulation {
     if (distance <= distancePerTick) {
       unit.position.x = target.x;
       unit.position.y = target.y;
-      unit.order.path.shift();
+      unit.path.shift();
     } else {
       unit.position.x += ((target.x - unit.position.x) / distance) * distancePerTick;
       unit.position.y += ((target.y - unit.position.y) / distance) * distancePerTick;
     }
+    return false;
   }
 
   private updateGathering(unit: UnitEntity, deltaMs: number, occupancy: boolean[]): void {
@@ -641,14 +659,11 @@ export class Simulation {
     const unitTile = getUnitTile(unit);
     if (unit.order.phase === "toResource") {
       if (!isAdjacent(unitTile, resourceEntity.tile)) {
-        unit.order = {
-          type: "move",
-          destination: resourceEntity.tile,
-          path: findPath(this.world.map, occupancy, unitTile, resourceEntity.tile),
-        };
+        this.moveUnitAlongPath(unit, resourceEntity.tile, deltaMs, occupancy);
         return;
       }
       unit.order.phase = "harvest";
+      unit.path = [];
     }
 
     if (unit.order.phase === "harvest") {
@@ -671,11 +686,7 @@ export class Simulation {
         }
         unit.order.phase = "toDropoff";
         unit.order.dropoffId = dropoff.id;
-        unit.order = {
-          type: "move",
-          destination: dropoff.tile,
-          path: findPath(this.world.map, occupancy, unitTile, dropoff.tile),
-        };
+        unit.path = [];
       }
       return;
     }
@@ -687,17 +698,14 @@ export class Simulation {
         return;
       }
       if (!isAdjacent(unitTile, dropoff.tile)) {
-        unit.order = {
-          type: "move",
-          destination: dropoff.tile,
-          path: findPath(this.world.map, occupancy, unitTile, dropoff.tile),
-        };
+        this.moveUnitAlongPath(unit, dropoff.tile, deltaMs, occupancy);
         return;
       }
       if (unit.carry) {
         addCost(this.world.players[unit.playerId].resources, unit.carry.type, unit.carry.amount);
         unit.carry.amount = 0;
       }
+      unit.path = [];
       unit.order = { type: "gather", targetId: resourceEntity.id, phase: "toResource" };
     }
   }
@@ -716,13 +724,10 @@ export class Simulation {
     const adjacent = footprintTiles.some((tile) => isAdjacent(unitTile, tile));
     if (!adjacent) {
       const nearest = footprintTiles[0];
-      unit.order = {
-        type: "move",
-        destination: nearest,
-        path: findPath(this.world.map, occupancy, unitTile, nearest),
-      };
+      this.moveUnitAlongPath(unit, nearest, deltaMs, occupancy);
       return;
     }
+    unit.path = [];
     target.buildProgressMs += deltaMs;
     target.hp = Math.min(target.maxHp, target.hp + Math.round(target.maxHp * 0.05));
     if (target.buildProgressMs >= BUILDING_DEFINITIONS[target.buildingType].buildTimeMs) {
@@ -748,16 +753,10 @@ export class Simulation {
     const definition = this.getModifiedUnitDefinition(unit.playerId, unit.unitType);
     const distance = getDistance(unitPosition, targetPosition);
     if (distance > definition.attackRange) {
-      unit.order = {
-        type: "move",
-        destination: { x: Math.round(targetPosition.x), y: Math.round(targetPosition.y) },
-        path: findPath(this.world.map, occupancy, getUnitTile(unit), {
-          x: Math.round(targetPosition.x),
-          y: Math.round(targetPosition.y),
-        }),
-      };
+      this.moveUnitAlongPath(unit, { x: Math.round(targetPosition.x), y: Math.round(targetPosition.y) }, _deltaMs, occupancy);
       return;
     }
+    unit.path = [];
     if (unit.attackCooldownMs > 0) {
       return;
     }
