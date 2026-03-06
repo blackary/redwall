@@ -22,4 +22,10 @@
 - Summary: Tightened controls with explicit command modes and Mac-friendly secondary-command fallbacks, stabilized HUD updates, added AI expansion/attack behavior, and covered combat continuity plus AI pressure in tests.
 - Tests run: `npm test`; `npm run build`; `npm run test:e2e -- tests/e2e/bootstrap.spec.ts tests/e2e/economy-resume.spec.ts tests/e2e/skirmish-ai.spec.ts`
 - Known gaps: Deployment/docs polish and GitHub Pages automation still need to be finalized.
+- Commit hash: `08b5604`
+
+## 2026-03-06 Milestone 6
+- Summary: Added a GitHub Pages deployment workflow, documented the current vertical slice and controls, and made the static build/deploy path explicit for the repo.
+- Tests run: `npm run build`
+- Known gaps: The built bundle is still large because Phaser ships in the main chunk; further split/polish work is possible, but the static deploy path is ready.
 - Commit hash: pending in git history after commit
