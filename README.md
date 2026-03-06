@@ -57,4 +57,4 @@ The Playwright suite covers:
 - AI skirmish expansion/pressure
 
 ## GitHub Pages
-The Pages workflow in [.github/workflows/deploy-pages.yml](/Users/zachary/projects/redwall/.github/workflows/deploy-pages.yml) installs dependencies, runs `npm test`, runs `npm run test:e2e`, builds the app with `npm run build`, and deploys the `dist/` output. Because Vite is configured with `base: "./"`, the generated `index.html` and asset paths are GitHub Pages compatible without router rewrites.
+The Pages workflow in [.github/workflows/deploy.yml](/Users/zachary/projects/redwall/.github/workflows/deploy.yml) installs dependencies, runs `npm test`, runs `npm run test:e2e`, builds the app with `npm run build`, and deploys the `dist/` output. Because Vite is configured with `base: "./"`, the generated `index.html` and asset paths are GitHub Pages compatible without router rewrites.
