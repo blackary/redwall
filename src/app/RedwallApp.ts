@@ -6,6 +6,7 @@ import { BrowserStorage, type GameSettings, type ResumeMetadata } from "../persi
 import type { GameSession } from "./GameSession";
 import type { RedwallScene } from "../render/RedwallScene";
 import type { Hud } from "../ui/Hud";
+import type { UnitAnimationState } from "../render/animation";
 
 type AppMode = "menu" | "skirmish";
 
@@ -29,6 +30,7 @@ type DebugApi = {
   getScreenPointForEntity: (id: string) => TilePoint | undefined;
   getScreenPointForTile: (tile: TilePoint) => TilePoint | undefined;
   selectInScreenRect: (from: TilePoint, to: TilePoint) => void;
+  getAnimationState: (id: string) => UnitAnimationState | undefined;
   getCameraState: () => { scrollX: number; scrollY: number; zoom: number } | undefined;
 };
 
@@ -95,6 +97,7 @@ export class RedwallApp {
       selectInScreenRect: (from: TilePoint, to: TilePoint) => {
         this.scene?.selectInScreenRect(from, to);
       },
+      getAnimationState: (id: string) => this.scene?.getAnimationState(id),
       getCameraState: () => this.scene?.getCameraState(),
     };
   }

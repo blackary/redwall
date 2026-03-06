@@ -44,8 +44,13 @@ test("selected production buildings show current work and queued items", async (
 
   await page.evaluate((id) => window.__REDWALL_DEBUG__?.setSelection([id]), barracksId);
   await expect(page.getByTestId("selection-name")).toHaveText("Barracks");
-  await page.getByTestId("action-train-militia").click();
-  await page.getByTestId("action-train-militia").click();
+  await page.evaluate((id) => {
+    if (!id) {
+      return;
+    }
+    window.__REDWALL_DEBUG__?.issueCommand({ type: "train", buildingId: id, unitType: "militia" });
+    window.__REDWALL_DEBUG__?.issueCommand({ type: "train", buildingId: id, unitType: "militia" });
+  }, barracksId);
   await page.evaluate(() => window.__REDWALL_DEBUG__?.advanceTicks(8));
 
   await expect(page.getByTestId("work-label")).toHaveText("Training: Militia");

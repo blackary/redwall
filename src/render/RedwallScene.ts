@@ -4,6 +4,7 @@ import { tileIndex } from "../core/map";
 import type { BuildingEntity, BuildingType, Entity, TilePoint, UnitEntity, WorldState } from "../core/types";
 import { GameSession } from "../app/GameSession";
 import type { GameSettings } from "../persistence/storage";
+import { getUnitAnimationState, type UnitAnimationState } from "./animation";
 import { getBoxSelectionIds } from "./selection";
 
 type Ping = { tile: TilePoint; ttlMs: number };
@@ -168,6 +169,8 @@ export class RedwallScene extends Phaser.Scene {
   private isPanning = false;
   private lastPanPoint?: { x: number; y: number };
   private lastSelectionClick?: { entityId: string; atMs: number };
+  private readonly hitFlashes = new Map<string, number>();
+  private readonly previousHpByEntity = new Map<string, number>();
 
   public constructor(session: GameSession, settings: GameSettings) {
     super("battlefield");
@@ -325,6 +328,14 @@ export class RedwallScene extends Phaser.Scene {
     return this.getScreenPointForTile(tile);
   }
 
+  public getAnimationState(entityId: string): UnitAnimationState | undefined {
+    const entity = this.session.getWorld().entities[entityId];
+    if (!entity || entity.kind !== "unit") {
+      return undefined;
+    }
+    return getUnitAnimationState(entity, this.time.now, { reducedMotion: this.settings.reducedMotion });
+  }
+
   public selectInScreenRect(from: TilePoint, to: TilePoint): void {
     this.selectEntitiesInWorldRect(this.screenToWorld(from), this.screenToWorld(to));
   }
@@ -395,6 +406,7 @@ export class RedwallScene extends Phaser.Scene {
     }
     const world = this.session.getWorld();
     const session = this.session.getSessionState();
+    this.updateDamageFlashes(world);
     terrainGraphics.clear();
     entityGraphics.clear();
     overlayGraphics.clear();
@@ -461,6 +473,7 @@ export class RedwallScene extends Phaser.Scene {
   }
 
   private drawEntities(graphics: Phaser.GameObjects.Graphics, world: WorldState, selectedIds: string[]): void {
+    const timeMs = this.time.now;
     const entities = Object.values(world.entities)
       .filter((entity) => this.isEntityVisibleToPlayer(world, entity))
       .sort((left, right) => {
@@ -474,14 +487,27 @@ export class RedwallScene extends Phaser.Scene {
         continue;
       }
       if (entity.kind === "building") {
-        this.drawBuilding(graphics, entity, selectedIds.includes(entity.id));
+        this.drawBuilding(graphics, entity, selectedIds.includes(entity.id), timeMs);
         continue;
       }
-      this.drawUnit(graphics, entity, selectedIds.includes(entity.id));
+      this.drawUnit(graphics, entity, selectedIds.includes(entity.id), world, timeMs);
     }
     for (const projectile of world.projectiles) {
       const point = this.tileToScreen(projectile.position);
-      graphics.fillStyle(projectile.playerId === "player" ? 0xf2dfa8 : 0xc65d5d, 1);
+      const target = world.entities[projectile.targetId];
+      const targetPosition = target && (target.kind === "unit" || target.kind === "building")
+        ? target.kind === "unit"
+          ? this.tileToScreen(target.position)
+          : this.tileToScreen({ x: target.tile.x + 0.5, y: target.tile.y + 0.5 })
+        : undefined;
+      const trailColor = projectile.playerId === "player" ? 0xf2dfa8 : 0xc65d5d;
+      if (targetPosition) {
+        const trailEndX = point.x + (point.x - targetPosition.x) * 0.18;
+        const trailEndY = point.y + (point.y - targetPosition.y) * 0.18 + 12;
+        graphics.lineStyle(2, trailColor, 0.78);
+        graphics.strokeLineShape(new Phaser.Geom.Line(point.x, point.y + 12, trailEndX, trailEndY));
+      }
+      graphics.fillStyle(trailColor, 1);
       graphics.fillCircle(point.x, point.y + 12, 4);
     }
   }
@@ -548,9 +574,18 @@ export class RedwallScene extends Phaser.Scene {
     graphics.fillCircle(rally.x, rally.y, 5);
   }
 
-  private drawBuilding(graphics: Phaser.GameObjects.Graphics, building: BuildingEntity, selected: boolean): void {
+  private drawBuilding(graphics: Phaser.GameObjects.Graphics, building: BuildingEntity, selected: boolean, timeMs: number): void {
     const definition = BUILDING_DEFINITIONS[building.buildingType];
-    const palette = getBuildingPalette(building);
+    const flashAmount = Math.max(0, Math.min(1, ((this.hitFlashes.get(building.id) ?? 0) - timeMs) / 160));
+    const basePalette = getBuildingPalette(building);
+    const palette = flashAmount > 0
+      ? {
+          ...basePalette,
+          wall: mixColor(basePalette.wall, 0xffffff, flashAmount * 0.42),
+          roof: mixColor(basePalette.roof, 0xffffff, flashAmount * 0.2),
+          trim: mixColor(basePalette.trim, 0xffffff, flashAmount * 0.3),
+        }
+      : basePalette;
     const point = this.tileToScreen({
       x: building.tile.x + definition.footprint.x / 2,
       y: building.tile.y + definition.footprint.y / 2,
@@ -559,6 +594,7 @@ export class RedwallScene extends Phaser.Scene {
     const height = definition.footprint.y * 24 + 30;
     const topY = point.y - 18;
     const bodyHeight = height - 10;
+    const pulse = (Math.sin(timeMs / 320 + point.x * 0.01) + 1) * 0.5;
 
     graphics.fillStyle(palette.shadow, 0.26);
     graphics.fillEllipse(point.x, point.y + height * 0.45, width * 1.1, 18 + definition.footprint.y * 7);
@@ -568,8 +604,8 @@ export class RedwallScene extends Phaser.Scene {
     graphics.fillRoundedRect(point.x - width / 2, topY + 18, width, bodyHeight - 18, 12);
     graphics.strokeRoundedRect(point.x - width / 2, topY + 18, width, bodyHeight - 18, 12);
 
-    this.drawBuildingRoof(graphics, building, point.x, topY, width, height, palette);
-    this.drawBuildingDetails(graphics, building, point.x, topY, width, height, palette);
+    this.drawBuildingRoof(graphics, building, point.x, topY, width, height, palette, pulse);
+    this.drawBuildingDetails(graphics, building, point.x, topY, width, height, palette, pulse);
     this.drawBuildingStatusBars(graphics, building, point.x, topY, width);
   }
 
@@ -581,6 +617,7 @@ export class RedwallScene extends Phaser.Scene {
     width: number,
     height: number,
     palette: BuildingPalette,
+    pulse: number,
   ): void {
     const roofHeight = Math.max(22, height * 0.34);
 
@@ -610,6 +647,8 @@ export class RedwallScene extends Phaser.Scene {
       graphics.fillRoundedRect(centerX - width * 0.38, topY - 10, width * 0.24, height * 0.78, 10);
       graphics.fillStyle(palette.trim, 1);
       graphics.fillRect(centerX - width * 0.34, topY - 16, width * 0.16, 10);
+      graphics.fillStyle(palette.banner, 0.55 + pulse * 0.24);
+      graphics.fillCircle(centerX - width * 0.26, topY - 20, 3 + pulse * 1.5);
     }
   }
 
@@ -621,6 +660,7 @@ export class RedwallScene extends Phaser.Scene {
     width: number,
     height: number,
     palette: BuildingPalette,
+    pulse: number,
   ): void {
     const bodyTop = topY + 22;
 
@@ -630,8 +670,17 @@ export class RedwallScene extends Phaser.Scene {
     graphics.fillRect(centerX - 4, topY + height - 10, 8, 18);
 
     if (building.buildingType !== "wall" && building.buildingType !== "gate") {
+      const flutter = 8 + pulse * 4;
       graphics.fillStyle(palette.banner, building.completed ? 0.95 : 0.6);
-      graphics.fillRect(centerX + width * 0.22, bodyTop + 4, 8, 18);
+      graphics.fillRect(centerX + width * 0.22, bodyTop + 4, 2, 18);
+      graphics.fillTriangle(
+        centerX + width * 0.22 + 2,
+        bodyTop + 5,
+        centerX + width * 0.22 + flutter,
+        bodyTop + 9,
+        centerX + width * 0.22 + 2,
+        bodyTop + 15,
+      );
     }
 
     switch (building.buildingType) {
@@ -657,6 +706,10 @@ export class RedwallScene extends Phaser.Scene {
         graphics.fillRect(centerX + width * 0.2, topY - 8, 12, 26);
         graphics.fillStyle(palette.accent, 0.95);
         graphics.fillCircle(centerX - width * 0.16, bodyTop + 18, 8);
+        if (building.queue.length > 0) {
+          graphics.fillStyle(0xf0a35c, 0.35 + pulse * 0.3);
+          graphics.fillCircle(centerX + width * 0.2 + 6, topY - 10 - pulse * 8, 4 + pulse * 2);
+        }
         break;
       case "granary":
         graphics.fillStyle(palette.accent, 1);
@@ -696,6 +749,10 @@ export class RedwallScene extends Phaser.Scene {
         graphics.lineStyle(2, palette.accent, 0.9);
         graphics.strokeLineShape(new Phaser.Geom.Line(centerX - 12, bodyTop + 9, centerX - 12, bodyTop + 27));
         graphics.strokeLineShape(new Phaser.Geom.Line(centerX - 21, bodyTop + 18, centerX - 3, bodyTop + 18));
+        if (building.queue.length > 0) {
+          graphics.fillStyle(palette.banner, 0.28 + pulse * 0.24);
+          graphics.fillCircle(centerX + 14, bodyTop - 4 - pulse * 6, 3 + pulse);
+        }
         break;
       default:
         graphics.fillStyle(palette.trim, 0.85);
@@ -742,10 +799,15 @@ export class RedwallScene extends Phaser.Scene {
     }
   }
 
-  private drawUnit(graphics: Phaser.GameObjects.Graphics, unit: UnitEntity, selected: boolean): void {
-    const point = this.tileToScreen(unit.position);
+  private drawUnit(graphics: Phaser.GameObjects.Graphics, unit: UnitEntity, selected: boolean, world: WorldState, timeMs: number): void {
+    const basePoint = this.tileToScreen(unit.position);
     const palette = getUnitPalette(unit);
     const species = getUnitSpecies(unit);
+    const pose = getUnitAnimationState(unit, timeMs, { reducedMotion: this.settings.reducedMotion });
+    const point = {
+      x: basePoint.x + pose.sway,
+      y: basePoint.y + pose.bob,
+    };
     const size = species === "badger"
       ? 16
       : species === "machine"
@@ -757,32 +819,48 @@ export class RedwallScene extends Phaser.Scene {
             : species === "shrew"
               ? 10
               : 11;
+    const hitFlash = Math.max(0, (this.hitFlashes.get(unit.id) ?? 0) - timeMs);
+    const flashAmount = hitFlash > 0 ? Math.min(1, hitFlash / 160) : 0;
     if (selected) {
       graphics.lineStyle(2, 0xf2dfa8, 1);
-      graphics.strokeEllipse(point.x, point.y + 15, species === "machine" ? 40 : 36, species === "machine" ? 18 : 16);
+      graphics.strokeEllipse(basePoint.x, basePoint.y + 15, species === "machine" ? 40 : 36, species === "machine" ? 18 : 16);
+    }
+    if (pose.dustAlpha > 0.06 && (pose.activity === "march" || pose.activity === "carry")) {
+      graphics.fillStyle(0xd1b57b, pose.dustAlpha);
+      graphics.fillCircle(basePoint.x - 7, basePoint.y + 17, 2 + Math.abs(pose.stride) * 0.25);
+      graphics.fillCircle(basePoint.x + 8, basePoint.y + 18, 1.6 + Math.abs(pose.armSwing) * 0.18);
     }
     graphics.fillStyle(palette.shadow, 0.25);
-    graphics.fillEllipse(point.x, point.y + 16, species === "machine" ? size * 2.6 : size * 2.2, species === "machine" ? 12 : 10);
+    graphics.fillEllipse(basePoint.x, basePoint.y + 16, species === "machine" ? size * 2.6 : size * 2.2, species === "machine" ? 12 : 10);
 
     if (species === "machine") {
-      this.drawRamCart(graphics, point, palette);
+      this.drawRamCart(graphics, point, palette, pose);
     } else {
-      const belly = mixColor(palette.fur, 0xf8f2e4, species === "badger" ? 0.45 : 0.3);
+      const furColor = flashAmount > 0 ? mixColor(palette.fur, 0xffffff, flashAmount * 0.45) : palette.fur;
+      const belly = mixColor(furColor, 0xf8f2e4, species === "badger" ? 0.45 : 0.3);
       const cloak = mixColor(palette.cloth, 0x1a130d, 0.18);
-      this.drawSpeciesTail(graphics, point, size, palette, species);
-      this.drawSpeciesLegs(graphics, point, size, palette, species);
+      this.drawSpeciesTail(graphics, point, size, palette, species, pose);
+      this.drawSpeciesLegs(graphics, point, size, palette, species, pose);
       graphics.fillStyle(cloak, 0.95);
-      graphics.fillTriangle(point.x - size * 0.9, point.y + 4, point.x + size * 0.8, point.y + 4, point.x - size * 0.08, point.y + size * 1.5);
+      graphics.fillTriangle(
+        point.x - size * 0.9 + pose.lean * 0.7,
+        point.y + 4,
+        point.x + size * 0.8 + pose.lean,
+        point.y + 4,
+        point.x - size * 0.08 + pose.lean * 0.3,
+        point.y + size * 1.5,
+      );
       graphics.fillStyle(palette.cloth, 1);
-      graphics.fillRoundedRect(point.x - size * 0.62, point.y - 2, size * 1.2, size * 1.38, 6);
+      graphics.fillRoundedRect(point.x - size * 0.62 + pose.lean * 0.4, point.y - 2, size * 1.2, size * 1.38, 6);
       graphics.fillStyle(mixColor(palette.accent, 0xffffff, 0.18), 0.95);
-      graphics.fillRect(point.x - size * 0.42, point.y + size * 0.34, size * 0.84, 3);
+      graphics.fillRect(point.x - size * 0.42 + pose.lean * 0.45, point.y + size * 0.34, size * 0.84, 3);
       graphics.fillStyle(belly, 0.9);
-      graphics.fillEllipse(point.x + size * 0.04, point.y + size * 0.2, size * 0.8, size * 0.98);
-      this.drawSpeciesHead(graphics, point, size, palette, species);
-      this.drawUnitGear(graphics, point, size, palette, unit, species);
+      graphics.fillEllipse(point.x + size * 0.04 + pose.lean * 0.6, point.y + size * 0.2, size * 0.8, size * 0.98);
+      this.drawSpeciesHead(graphics, point, size, palette, species, pose, furColor);
+      this.drawUnitGear(graphics, point, size, palette, unit, species, pose);
       graphics.fillStyle(palette.accent, 0.92);
-      graphics.fillRect(point.x - 4, point.y - 1, 8, 10);
+      graphics.fillRect(point.x - 4 + pose.lean * 0.4, point.y - 1, 8, 10);
+      this.drawUnitActionEffects(graphics, point, size, palette, unit, pose, world);
     }
     graphics.fillStyle(0x20160f, 1);
     graphics.fillRect(point.x - 16, point.y - 24, 32, 5);
@@ -790,16 +868,16 @@ export class RedwallScene extends Phaser.Scene {
     graphics.fillRect(point.x - 16, point.y - 24, 32 * Math.max(0, unit.hp) / unit.maxHp, 5);
   }
 
-  private drawRamCart(graphics: Phaser.GameObjects.Graphics, point: TilePoint, palette: UnitPalette): void {
+  private drawRamCart(graphics: Phaser.GameObjects.Graphics, point: TilePoint, palette: UnitPalette, pose: UnitAnimationState): void {
     const wood = mixColor(palette.fur, 0x4f321d, 0.36);
     const hide = mixColor(palette.cloth, 0xd2bf8d, 0.16);
     graphics.fillStyle(wood, 1);
-    graphics.fillRoundedRect(point.x - 18, point.y + 1, 28, 13, 4);
+    graphics.fillRoundedRect(point.x - 18, point.y + 1 + pose.bob * 0.2, 28, 13, 4);
     graphics.fillStyle(mixColor(wood, 0xf3e1b6, 0.18), 0.95);
-    graphics.fillRect(point.x - 17, point.y + 4, 22, 3);
+    graphics.fillRect(point.x - 17, point.y + 4 + pose.bob * 0.2, 22, 3);
     graphics.fillStyle(palette.metal, 1);
-    graphics.fillRect(point.x - 5, point.y + 3, 24, 4);
-    graphics.fillTriangle(point.x + 16, point.y + 2, point.x + 28, point.y + 8, point.x + 16, point.y + 14);
+    graphics.fillRect(point.x - 5, point.y + 3 + pose.bob * 0.18, 24, 4);
+    graphics.fillTriangle(point.x + 16, point.y + 2, point.x + 28 + pose.gearSwing, point.y + 8, point.x + 16, point.y + 14);
     graphics.fillStyle(hide, 1);
     graphics.fillTriangle(point.x - 5, point.y - 2, point.x + 11, point.y + 2, point.x - 2, point.y + 11);
     graphics.fillStyle(palette.metal, 1);
@@ -824,30 +902,32 @@ export class RedwallScene extends Phaser.Scene {
     size: number,
     palette: UnitPalette,
     species: UnitSpecies,
+    pose: UnitAnimationState,
   ): void {
     const tailColor = mixColor(palette.fur, palette.shadow, 0.2);
+    const swing = pose.tailSwing;
     switch (species) {
       case "mouse":
         graphics.lineStyle(2, mixColor(palette.fur, 0xe8b8a7, 0.35), 0.95);
-        graphics.strokeLineShape(new Phaser.Geom.Line(point.x - size * 0.35, point.y + size * 0.9, point.x - size * 1.45, point.y + size * 1.1));
-        graphics.strokeLineShape(new Phaser.Geom.Line(point.x - size * 1.45, point.y + size * 1.1, point.x - size * 1.82, point.y + size * 0.4));
+        graphics.strokeLineShape(new Phaser.Geom.Line(point.x - size * 0.35, point.y + size * 0.9, point.x - size * 1.45 - swing, point.y + size * 1.1));
+        graphics.strokeLineShape(new Phaser.Geom.Line(point.x - size * 1.45 - swing, point.y + size * 1.1, point.x - size * 1.82 - swing * 1.3, point.y + size * 0.4));
         break;
       case "shrew":
         graphics.lineStyle(2, mixColor(palette.fur, 0xe4b9a4, 0.26), 0.95);
-        graphics.strokeLineShape(new Phaser.Geom.Line(point.x - size * 0.48, point.y + size * 0.82, point.x - size * 1.55, point.y + size * 0.95));
-        graphics.strokeLineShape(new Phaser.Geom.Line(point.x - size * 1.55, point.y + size * 0.95, point.x - size * 2.2, point.y + size * 0.18));
+        graphics.strokeLineShape(new Phaser.Geom.Line(point.x - size * 0.48, point.y + size * 0.82, point.x - size * 1.55 - swing, point.y + size * 0.95));
+        graphics.strokeLineShape(new Phaser.Geom.Line(point.x - size * 1.55 - swing, point.y + size * 0.95, point.x - size * 2.2 - swing * 1.4, point.y + size * 0.18));
         break;
       case "otter":
         graphics.fillStyle(tailColor, 0.95);
-        graphics.fillEllipse(point.x - size * 0.95, point.y + size * 0.84, size * 1.15, size * 0.4);
+        graphics.fillEllipse(point.x - size * 0.95 - swing * 0.4, point.y + size * 0.84, size * 1.15, size * 0.4);
         break;
       case "hare":
         graphics.fillStyle(mixColor(palette.fur, 0xf4eee2, 0.32), 1);
-        graphics.fillCircle(point.x - size * 0.7, point.y + size * 0.76, size * 0.16);
+        graphics.fillCircle(point.x - size * 0.7 - swing * 0.18, point.y + size * 0.76, size * 0.16);
         break;
       case "badger":
         graphics.fillStyle(tailColor, 1);
-        graphics.fillRoundedRect(point.x - size * 0.8, point.y + size * 0.75, size * 0.42, size * 0.2, 3);
+        graphics.fillRoundedRect(point.x - size * 0.8 - swing * 0.25, point.y + size * 0.75, size * 0.42, size * 0.2, 3);
         break;
       default:
         break;
@@ -860,18 +940,20 @@ export class RedwallScene extends Phaser.Scene {
     size: number,
     palette: UnitPalette,
     species: UnitSpecies,
+    pose: UnitAnimationState,
   ): void {
     const footColor = mixColor(palette.fur, palette.shadow, 0.16);
     const footY = point.y + size * 1.26;
+    const stride = pose.stride;
     if (species === "hare") {
       graphics.fillStyle(footColor, 1);
-      graphics.fillEllipse(point.x - size * 0.26, footY, size * 0.44, size * 0.18);
-      graphics.fillEllipse(point.x + size * 0.24, footY - 1, size * 0.5, size * 0.18);
+      graphics.fillEllipse(point.x - size * 0.26 - stride * 0.2, footY, size * 0.44, size * 0.18);
+      graphics.fillEllipse(point.x + size * 0.24 + stride * 0.24, footY - 1, size * 0.5, size * 0.18);
       return;
     }
     graphics.fillStyle(footColor, 1);
-    graphics.fillEllipse(point.x - size * 0.2, footY, size * 0.3, size * 0.16);
-    graphics.fillEllipse(point.x + size * 0.2, footY, size * 0.3, size * 0.16);
+    graphics.fillEllipse(point.x - size * 0.2 - stride * 0.18, footY, size * 0.3, size * 0.16);
+    graphics.fillEllipse(point.x + size * 0.2 + stride * 0.18, footY, size * 0.3, size * 0.16);
   }
 
   private drawSpeciesHead(
@@ -880,18 +962,20 @@ export class RedwallScene extends Phaser.Scene {
     size: number,
     palette: UnitPalette,
     species: UnitSpecies,
+    pose: UnitAnimationState,
+    furColor: number,
   ): void {
-    const headX = point.x + size * 0.06;
-    const headY = point.y - size * 0.76;
-    const earColor = mixColor(palette.fur, 0xe7bca3, 0.24);
-    const muzzleColor = mixColor(palette.fur, 0xf8f1e3, 0.38);
+    const headX = point.x + size * 0.06 + pose.lean * 0.6;
+    const headY = point.y - size * 0.76 + pose.headNod;
+    const earColor = mixColor(furColor, 0xe7bca3, 0.24);
+    const muzzleColor = mixColor(furColor, 0xf8f1e3, 0.38);
 
     switch (species) {
       case "mouse":
         graphics.fillStyle(earColor, 1);
         graphics.fillCircle(headX - size * 0.33, headY - size * 0.22, size * 0.24);
         graphics.fillCircle(headX + size * 0.18, headY - size * 0.26, size * 0.24);
-        graphics.fillStyle(palette.fur, 1);
+        graphics.fillStyle(furColor, 1);
         graphics.fillEllipse(headX, headY, size * 0.95, size * 0.82);
         graphics.fillStyle(muzzleColor, 0.95);
         graphics.fillEllipse(headX + size * 0.2, headY + size * 0.1, size * 0.46, size * 0.3);
@@ -903,7 +987,7 @@ export class RedwallScene extends Phaser.Scene {
         graphics.fillStyle(earColor, 1);
         graphics.fillCircle(headX - size * 0.28, headY - size * 0.16, size * 0.13);
         graphics.fillCircle(headX - size * 0.05, headY - size * 0.24, size * 0.12);
-        graphics.fillStyle(palette.fur, 1);
+        graphics.fillStyle(furColor, 1);
         graphics.fillEllipse(headX - size * 0.02, headY, size * 0.78, size * 0.54);
         graphics.fillTriangle(headX + size * 0.18, headY - size * 0.08, headX + size * 0.82, headY + size * 0.05, headX + size * 0.18, headY + size * 0.18);
         graphics.fillStyle(mixColor(palette.accent, 0x1f1611, 0.18), 1);
@@ -914,7 +998,7 @@ export class RedwallScene extends Phaser.Scene {
         graphics.fillStyle(earColor, 1);
         graphics.fillCircle(headX - size * 0.2, headY - size * 0.22, size * 0.12);
         graphics.fillCircle(headX + size * 0.12, headY - size * 0.24, size * 0.12);
-        graphics.fillStyle(palette.fur, 1);
+        graphics.fillStyle(furColor, 1);
         graphics.fillEllipse(headX, headY, size * 0.98, size * 0.62);
         graphics.fillStyle(muzzleColor, 0.95);
         graphics.fillEllipse(headX + size * 0.18, headY + size * 0.05, size * 0.52, size * 0.26);
@@ -923,13 +1007,13 @@ export class RedwallScene extends Phaser.Scene {
         this.drawWhiskers(graphics, headX + size * 0.18, headY + size * 0.06, size * 0.36, palette.shadow);
         break;
       case "hare":
-        graphics.fillStyle(palette.fur, 1);
+        graphics.fillStyle(furColor, 1);
         graphics.fillTriangle(headX - size * 0.18, headY - size * 0.1, headX + size * 0.02, headY - size * 1.34, headX + size * 0.18, headY - size * 0.1);
         graphics.fillTriangle(headX + size * 0.12, headY - size * 0.08, headX + size * 0.36, headY - size * 1.26, headX + size * 0.5, headY - size * 0.06);
         graphics.fillStyle(earColor, 1);
         graphics.fillTriangle(headX - size * 0.04, headY - size * 0.18, headX + size * 0.05, headY - size * 1.02, headX + size * 0.12, headY - size * 0.12);
         graphics.fillTriangle(headX + size * 0.2, headY - size * 0.16, headX + size * 0.29, headY - size * 0.94, headX + size * 0.36, headY - size * 0.1);
-        graphics.fillStyle(palette.fur, 1);
+        graphics.fillStyle(furColor, 1);
         graphics.fillEllipse(headX + size * 0.08, headY, size * 0.76, size * 0.7);
         graphics.fillStyle(muzzleColor, 0.95);
         graphics.fillEllipse(headX + size * 0.22, headY + size * 0.12, size * 0.38, size * 0.24);
@@ -940,7 +1024,7 @@ export class RedwallScene extends Phaser.Scene {
         graphics.fillStyle(mixColor(palette.shadow, 0x312723, 0.15), 1);
         graphics.fillCircle(headX - size * 0.26, headY - size * 0.26, size * 0.18);
         graphics.fillCircle(headX + size * 0.18, headY - size * 0.26, size * 0.18);
-        graphics.fillStyle(palette.fur, 1);
+        graphics.fillStyle(furColor, 1);
         graphics.fillEllipse(headX, headY, size * 0.94, size * 0.82);
         graphics.fillStyle(0x1c1c1c, 1);
         graphics.fillRect(headX - size * 0.14, headY - size * 0.44, size * 0.12, size * 0.78);
@@ -966,26 +1050,37 @@ export class RedwallScene extends Phaser.Scene {
     palette: UnitPalette,
     unit: UnitEntity,
     species: UnitSpecies,
+    pose: UnitAnimationState,
   ): void {
     const wood = mixColor(palette.accent, 0x4a301b, 0.36);
     if (UNIT_DEFINITIONS[unit.unitType].tags.includes("ranged")) {
       graphics.lineStyle(2, wood, 0.95);
-      graphics.strokeLineShape(new Phaser.Geom.Line(point.x + size * 0.46, point.y - size * 0.28, point.x + size * 1.08, point.y + size * 0.58));
-      graphics.strokeLineShape(new Phaser.Geom.Line(point.x + size * 1.08, point.y - size * 0.22, point.x + size * 1.08, point.y + size * 0.58));
+      graphics.strokeLineShape(new Phaser.Geom.Line(
+        point.x + size * 0.46 + pose.lean * 0.6,
+        point.y - size * 0.28 - pose.armSwing * 0.25,
+        point.x + size * 1.08 + pose.gearSwing * 0.35,
+        point.y + size * 0.58,
+      ));
+      graphics.strokeLineShape(new Phaser.Geom.Line(
+        point.x + size * 1.08 + pose.gearSwing * 0.35,
+        point.y - size * 0.22 - pose.armSwing * 0.3,
+        point.x + size * 1.08 + pose.gearSwing * 0.35,
+        point.y + size * 0.58,
+      ));
       if (unit.unitType === "otterSkirmisher") {
         graphics.lineStyle(2, palette.metal, 0.95);
-        graphics.strokeLineShape(new Phaser.Geom.Line(point.x - size * 0.08, point.y - size * 0.18, point.x + size * 1.12, point.y + size * 0.34));
+        graphics.strokeLineShape(new Phaser.Geom.Line(point.x - size * 0.08, point.y - size * 0.18, point.x + size * 1.12 + pose.gearSwing * 0.3, point.y + size * 0.34));
       }
       return;
     }
 
     if (unit.unitType === "worker") {
       graphics.fillStyle(wood, 1);
-      graphics.fillRect(point.x + size * 0.5, point.y - size * 0.34, 3, size * 1.58);
+      graphics.fillRect(point.x + size * 0.5 + pose.gearSwing * 0.45, point.y - size * 0.34 - Math.abs(pose.armSwing) * 0.6, 3, size * 1.58);
       graphics.fillStyle(palette.metal, 1);
-      graphics.fillRect(point.x + size * 0.32, point.y - size * 0.48, size * 0.62, 4);
+      graphics.fillRect(point.x + size * 0.32 + pose.gearSwing * 0.45, point.y - size * 0.48 - Math.abs(pose.armSwing) * 0.6, size * 0.62, 4);
       graphics.fillStyle(mixColor(palette.cloth, 0x684a2d, 0.28), 0.95);
-      graphics.fillCircle(point.x - size * 0.58, point.y + size * 0.44, size * 0.18);
+      graphics.fillCircle(point.x - size * 0.58 - pose.gearSwing * 0.12, point.y + size * 0.44, size * 0.18);
       return;
     }
 
@@ -997,19 +1092,84 @@ export class RedwallScene extends Phaser.Scene {
     }
 
     graphics.fillStyle(species === "hare" ? palette.accent : palette.metal, 1);
-    graphics.fillRect(point.x + size * 0.52, point.y - size * 0.58, 3, size * 1.74);
+    graphics.fillRect(point.x + size * 0.52 + pose.gearSwing * 0.28, point.y - size * 0.58 - Math.abs(pose.armSwing) * 0.35, 3, size * 1.74);
     if (unit.unitType === "badgerChampion") {
       graphics.fillStyle(palette.metal, 1);
-      graphics.fillTriangle(point.x + size * 0.48, point.y - size * 0.5, point.x + size * 1.08, point.y - size * 0.2, point.x + size * 0.48, point.y + size * 0.08);
+      graphics.fillTriangle(
+        point.x + size * 0.48 + pose.gearSwing * 0.2,
+        point.y - size * 0.5 - Math.abs(pose.armSwing) * 0.28,
+        point.x + size * 1.08 + pose.gearSwing * 0.45,
+        point.y - size * 0.2,
+        point.x + size * 0.48 + pose.gearSwing * 0.2,
+        point.y + size * 0.08,
+      );
       return;
     }
     if (unit.unitType === "hareRunner") {
       graphics.lineStyle(2, palette.metal, 0.95);
-      graphics.strokeLineShape(new Phaser.Geom.Line(point.x + size * 0.48, point.y + size * 0.16, point.x + size * 1.22, point.y + size * 0.02));
+      graphics.strokeLineShape(new Phaser.Geom.Line(point.x + size * 0.48, point.y + size * 0.16, point.x + size * 1.22 + pose.gearSwing * 0.42, point.y + size * 0.02));
       return;
     }
     graphics.fillStyle(palette.metal, 1);
-    graphics.fillTriangle(point.x + size * 0.38, point.y - size * 0.7, point.x + size * 0.66, point.y - size * 1.02, point.x + size * 0.96, point.y - size * 0.64);
+    graphics.fillTriangle(
+      point.x + size * 0.38 + pose.gearSwing * 0.2,
+      point.y - size * 0.7 - Math.abs(pose.armSwing) * 0.35,
+      point.x + size * 0.66 + pose.gearSwing * 0.35,
+      point.y - size * 1.02,
+      point.x + size * 0.96 + pose.gearSwing * 0.45,
+      point.y - size * 0.64,
+    );
+  }
+
+  private drawUnitActionEffects(
+    graphics: Phaser.GameObjects.Graphics,
+    point: TilePoint,
+    size: number,
+    palette: UnitPalette,
+    unit: UnitEntity,
+    pose: UnitAnimationState,
+    world: WorldState,
+  ): void {
+    if (pose.activity === "harvest" && unit.order.type === "gather") {
+      const target = world.entities[unit.order.targetId];
+      const effectColor = target?.kind === "resource"
+        ? target.resourceType === "timber"
+          ? 0xb78456
+          : target.resourceType === "food"
+            ? 0x8ebf68
+            : target.resourceType === "stone"
+              ? 0xc0b9aa
+              : 0xcd865d
+        : 0xd9ba73;
+      graphics.fillStyle(effectColor, 0.24 + pose.pulse * 0.36);
+      graphics.fillCircle(point.x + size * 0.9 + pose.gearSwing * 0.15, point.y + size * 0.12 - pose.armSwing * 0.18, 2 + pose.pulse * 1.2);
+      graphics.fillCircle(point.x + size * 0.58, point.y - size * 0.12 - pose.pulse * 4, 1.6);
+      return;
+    }
+
+    if (pose.activity === "build") {
+      graphics.fillStyle(0xe0bc6f, 0.28 + pose.pulse * 0.34);
+      graphics.fillCircle(point.x + size * 0.76 + pose.gearSwing * 0.2, point.y - size * 0.08 - pose.pulse * 6, 2 + pose.pulse * 1.3);
+      graphics.fillCircle(point.x + size * 0.46, point.y + size * 0.18 - pose.pulse * 2.2, 1.5);
+      return;
+    }
+
+    if (pose.activity === "attack") {
+      const slashColor = UNIT_DEFINITIONS[unit.unitType].tags.includes("ranged") ? palette.accent : 0xf3d497;
+      graphics.lineStyle(2, slashColor, 0.2 + pose.pulse * 0.45);
+      if (UNIT_DEFINITIONS[unit.unitType].tags.includes("ranged")) {
+        graphics.strokeLineShape(new Phaser.Geom.Line(
+          point.x + size * 0.65,
+          point.y - size * 0.18,
+          point.x + size * 1.32 + pose.gearSwing * 0.3,
+          point.y + size * 0.14,
+        ));
+      } else {
+        graphics.beginPath();
+        graphics.arc(point.x + size * 0.72, point.y - size * 0.12, size * 0.52, -0.7, 0.55, false);
+        graphics.strokePath();
+      }
+    }
   }
 
   private drawWhiskers(graphics: Phaser.GameObjects.Graphics, x: number, y: number, length: number, color: number): void {
@@ -1237,6 +1397,35 @@ export class RedwallScene extends Phaser.Scene {
   private selectEntitiesInWorldRect(from: TilePoint, to: TilePoint): void {
     const selectedIds = getBoxSelectionIds(this.session.getWorld(), from, to, (tile) => this.tileToScreen(tile));
     this.session.setSelection(selectedIds);
+  }
+
+  private updateDamageFlashes(world: WorldState): void {
+    const now = this.time.now;
+    const liveIds = new Set<string>();
+    for (const entity of Object.values(world.entities)) {
+      if (entity.kind === "resource") {
+        continue;
+      }
+      liveIds.add(entity.id);
+      const previousHp = this.previousHpByEntity.get(entity.id);
+      if (previousHp !== undefined && entity.hp < previousHp) {
+        this.hitFlashes.set(entity.id, now + 160);
+      }
+      this.previousHpByEntity.set(entity.id, entity.hp);
+    }
+
+    for (const entityId of [...this.previousHpByEntity.keys()]) {
+      if (!liveIds.has(entityId)) {
+        this.previousHpByEntity.delete(entityId);
+        this.hitFlashes.delete(entityId);
+      }
+    }
+
+    for (const [entityId, untilMs] of [...this.hitFlashes.entries()]) {
+      if (untilMs <= now) {
+        this.hitFlashes.delete(entityId);
+      }
+    }
   }
 
   private isEntityVisibleToPlayer(world: WorldState, entity: Entity): boolean {
