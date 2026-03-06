@@ -35,3 +35,9 @@
 - Tests run: `npm test`; `npm run test:e2e -- tests/e2e/bootstrap.spec.ts tests/e2e/economy-resume.spec.ts tests/e2e/skirmish-ai.spec.ts tests/e2e/settings.spec.ts`; `npm run build`
 - Known gaps: The main bundle is still large because Phaser remains in the primary chunk; deploy is now verified, but bundle splitting is still worth doing.
 - Commit hash: `6de67ec`
+
+## 2026-03-06 Art and Production Readability
+- Summary: Reworked battlefield rendering with original stylized art for woodland units, buildings, terrain, and resources; added in-world work bars for construction and queues; and added a detailed building work-state panel so barracks, ranges, halls, and workshops clearly show current production plus queued follow-ups.
+- Tests run: `npm test`; `npm run test:e2e -- tests/e2e/bootstrap.spec.ts tests/e2e/economy-resume.spec.ts tests/e2e/skirmish-ai.spec.ts tests/e2e/settings.spec.ts tests/e2e/production-progress.spec.ts`; `npm run build`
+- Known gaps: Rendering is still immediate-mode Phaser graphics rather than sprite-atlas art, so there is room for a deeper illustration pass and bundle splitting later.
+- Commit hash: pending

@@ -1,14 +1,110 @@
 import Phaser from "phaser";
-import { BUILDING_DEFINITIONS, UNIT_DEFINITIONS } from "../core/content";
+import { BUILDING_DEFINITIONS, RESEARCH_DEFINITIONS, UNIT_DEFINITIONS } from "../core/content";
 import { tileIndex } from "../core/map";
 import type { BuildingEntity, BuildingType, Entity, TilePoint, UnitEntity, WorldState } from "../core/types";
 import { GameSession } from "../app/GameSession";
 import type { GameSettings } from "../persistence/storage";
 
 type Ping = { tile: TilePoint; ttlMs: number };
+type BuildingPalette = {
+  wall: number;
+  roof: number;
+  trim: number;
+  accent: number;
+  banner: number;
+  shadow: number;
+};
+type UnitPalette = {
+  fur: number;
+  cloth: number;
+  accent: number;
+  metal: number;
+  shadow: number;
+};
 
 function clamp(value: number, minimum: number, maximum: number): number {
   return Math.min(maximum, Math.max(minimum, value));
+}
+
+function getQueueItemTotalMs(building: BuildingEntity): number | undefined {
+  const current = building.queue[0];
+  if (!current) {
+    return undefined;
+  }
+  if (current.kind === "unit") {
+    return UNIT_DEFINITIONS[current.id as keyof typeof UNIT_DEFINITIONS].trainTimeMs;
+  }
+  if (current.kind === "research") {
+    return RESEARCH_DEFINITIONS[current.id as keyof typeof RESEARCH_DEFINITIONS].researchTimeMs;
+  }
+  return current.id === "abbey"
+    ? RESEARCH_DEFINITIONS.abbeyAge.researchTimeMs
+    : RESEARCH_DEFINITIONS.warhostAge.researchTimeMs;
+}
+
+function getBuildingPalette(building: BuildingEntity): BuildingPalette {
+  const playerPalette = building.playerId === "player"
+    ? {
+        wall: 0xc8ae80,
+        roof: 0x9a5f44,
+        trim: 0xf1e1b2,
+        accent: 0x58725f,
+        banner: 0xdcbf73,
+        shadow: 0x1b1410,
+      }
+    : {
+        wall: 0x8d5a52,
+        roof: 0x5f221c,
+        trim: 0xd8a48d,
+        accent: 0x6b2d27,
+        banner: 0xc96e5c,
+        shadow: 0x190f0f,
+      };
+
+  switch (building.buildingType) {
+    case "granary":
+      return { ...playerPalette, roof: building.playerId === "player" ? 0x8b7841 : 0x5c4130, accent: 0xc9944f };
+    case "range":
+      return { ...playerPalette, roof: building.playerId === "player" ? 0x496d4c : 0x40503d, accent: 0xd8b77d };
+    case "blacksmith":
+      return { ...playerPalette, roof: building.playerId === "player" ? 0x4b4e55 : 0x423639, accent: 0xe08b4e };
+    case "longPatrolLodge":
+      return { ...playerPalette, roof: building.playerId === "player" ? 0xa14538 : 0x7d2b26, accent: 0xefc178 };
+    case "tower":
+    case "wall":
+    case "gate":
+      return { ...playerPalette, wall: building.playerId === "player" ? 0xa5a196 : 0x77635f, roof: building.playerId === "player" ? 0x7e8687 : 0x5a3d3a };
+    case "workshop":
+      return { ...playerPalette, roof: building.playerId === "player" ? 0x7a5a34 : 0x603825, accent: 0xc78948 };
+    default:
+      return playerPalette;
+  }
+}
+
+function getUnitPalette(unit: UnitEntity): UnitPalette {
+  const friendly = unit.playerId === "player";
+  const base = friendly
+    ? { fur: 0xf0d7aa, cloth: 0x4a6456, accent: 0xdbbc73, metal: 0x8e8f95, shadow: 0x1d1712 }
+    : { fur: 0xc06d63, cloth: 0x5b2421, accent: 0xcf8f77, metal: 0x76686d, shadow: 0x170f0f };
+
+  switch (unit.unitType) {
+    case "worker":
+      return { ...base, cloth: friendly ? 0x5c7254 : 0x5d3326 };
+    case "shrewScout":
+      return { ...base, fur: friendly ? 0xc8b89d : 0xb87368, cloth: friendly ? 0x4f6c81 : 0x6d3640 };
+    case "archer":
+    case "slinger":
+    case "otterSkirmisher":
+      return { ...base, cloth: friendly ? 0x556b7f : 0x6b3838 };
+    case "hareRunner":
+      return { ...base, fur: friendly ? 0xe9cf9f : 0xd2856d, cloth: friendly ? 0xa34a3c : 0x7b2d27 };
+    case "badgerChampion":
+      return { fur: 0xe8e3d7, cloth: friendly ? 0x7a4334 : 0x6a2d28, accent: 0xf0d391, metal: 0xa9aaaf, shadow: 0x161212 };
+    case "ramCart":
+      return { fur: 0x8d6844, cloth: 0x6a4a2b, accent: friendly ? 0xd7b36f : 0xb96e56, metal: 0x77716c, shadow: 0x18120f };
+    default:
+      return base;
+  }
 }
 
 export class RedwallScene extends Phaser.Scene {
@@ -223,6 +319,8 @@ export class RedwallScene extends Phaser.Scene {
                 ? 0x4e6f48
                 : 0x2d402b;
         const lineAlpha = this.settings.showGrid ? 0.72 : 0.14;
+        const shadowColor = tile.terrain === "dirt" ? 0x3a281d : 0x18231b;
+        const highlightColor = tile.terrain === "dirt" ? 0xa47b53 : 0x6e9d72;
         graphics.fillStyle(fillColor, 1);
         graphics.lineStyle(1, visible ? 0x182220 : 0x0d1412, lineAlpha);
         graphics.beginPath();
@@ -233,6 +331,27 @@ export class RedwallScene extends Phaser.Scene {
         graphics.closePath();
         graphics.fillPath();
         graphics.strokePath();
+
+        if (explored) {
+          graphics.fillStyle(highlightColor, visible ? 0.18 : 0.08);
+          graphics.fillTriangle(
+            point.x,
+            point.y + 5,
+            point.x + this.tileWidth / 2 - 8,
+            point.y + this.tileHeight / 2 - 4,
+            point.x - this.tileWidth / 2 + 8,
+            point.y + this.tileHeight / 2 - 4,
+          );
+          graphics.fillStyle(shadowColor, visible ? 0.2 : 0.12);
+          graphics.fillTriangle(
+            point.x - this.tileWidth / 2 + 4,
+            point.y + this.tileHeight / 2 + 1,
+            point.x + this.tileWidth / 2 - 4,
+            point.y + this.tileHeight / 2 + 1,
+            point.x,
+            point.y + this.tileHeight - 5,
+          );
+        }
       }
     }
   }
@@ -335,39 +454,258 @@ export class RedwallScene extends Phaser.Scene {
 
   private drawBuilding(graphics: Phaser.GameObjects.Graphics, building: BuildingEntity, selected: boolean): void {
     const definition = BUILDING_DEFINITIONS[building.buildingType];
+    const palette = getBuildingPalette(building);
     const point = this.tileToScreen({
       x: building.tile.x + definition.footprint.x / 2,
       y: building.tile.y + definition.footprint.y / 2,
     });
     const width = definition.footprint.x * 38;
     const height = definition.footprint.y * 24 + 30;
-    const fillColor = building.playerId === "player" ? 0xc6a15c : 0x8d403e;
-    graphics.fillStyle(fillColor, building.completed ? 0.95 : 0.55);
-    graphics.lineStyle(selected ? 3 : 2, selected ? 0xf2dfa8 : 0x22180f, 1);
-    graphics.fillRoundedRect(point.x - width / 2, point.y - 20, width, height, 10);
-    graphics.strokeRoundedRect(point.x - width / 2, point.y - 20, width, height, 10);
+    const topY = point.y - 18;
+    const bodyHeight = height - 10;
 
+    graphics.fillStyle(palette.shadow, 0.26);
+    graphics.fillEllipse(point.x, point.y + height * 0.45, width * 1.1, 18 + definition.footprint.y * 7);
+
+    graphics.lineStyle(selected ? 3 : 2, selected ? 0xf2dfa8 : 0x241710, 1);
+    graphics.fillStyle(palette.wall, building.completed ? 0.98 : 0.58);
+    graphics.fillRoundedRect(point.x - width / 2, topY + 18, width, bodyHeight - 18, 12);
+    graphics.strokeRoundedRect(point.x - width / 2, topY + 18, width, bodyHeight - 18, 12);
+
+    this.drawBuildingRoof(graphics, building, point.x, topY, width, height, palette);
+    this.drawBuildingDetails(graphics, building, point.x, topY, width, height, palette);
+    this.drawBuildingStatusBars(graphics, building, point.x, topY, width);
+  }
+
+  private drawBuildingRoof(
+    graphics: Phaser.GameObjects.Graphics,
+    building: BuildingEntity,
+    centerX: number,
+    topY: number,
+    width: number,
+    height: number,
+    palette: BuildingPalette,
+  ): void {
+    const roofHeight = Math.max(22, height * 0.34);
+
+    if (building.buildingType === "tower") {
+      graphics.fillStyle(palette.roof, 1);
+      graphics.fillRoundedRect(centerX - width * 0.24, topY - roofHeight * 0.2, width * 0.48, height * 0.8, 14);
+      graphics.fillStyle(palette.trim, 1);
+      for (let index = -1; index <= 1; index += 1) {
+        graphics.fillRect(centerX + index * 10 - 4, topY - roofHeight * 0.2 - 7, 8, 9);
+      }
+      return;
+    }
+
+    if (building.buildingType === "wall" || building.buildingType === "gate") {
+      graphics.fillStyle(palette.roof, 1);
+      graphics.fillRoundedRect(centerX - width / 2, topY + 8, width, 14, 6);
+      return;
+    }
+
+    graphics.fillStyle(palette.roof, 1);
+    graphics.fillTriangle(centerX - width / 2 - 6, topY + 22, centerX, topY - roofHeight, centerX + width / 2 + 6, topY + 22);
+    graphics.fillStyle(palette.trim, 0.18);
+    graphics.fillTriangle(centerX - width / 2 + 6, topY + 20, centerX, topY - roofHeight + 8, centerX + width / 2 - 8, topY + 20);
+
+    if (building.buildingType === "abbeyHall") {
+      graphics.fillStyle(palette.roof, 1);
+      graphics.fillRoundedRect(centerX - width * 0.38, topY - 10, width * 0.24, height * 0.78, 10);
+      graphics.fillStyle(palette.trim, 1);
+      graphics.fillRect(centerX - width * 0.34, topY - 16, width * 0.16, 10);
+    }
+  }
+
+  private drawBuildingDetails(
+    graphics: Phaser.GameObjects.Graphics,
+    building: BuildingEntity,
+    centerX: number,
+    topY: number,
+    width: number,
+    height: number,
+    palette: BuildingPalette,
+  ): void {
+    const bodyTop = topY + 22;
+
+    graphics.fillStyle(0x2b1d12, 0.75);
+    graphics.fillRect(centerX - 8, topY + height - 14, 16, 22);
+    graphics.fillStyle(palette.trim, 0.85);
+    graphics.fillRect(centerX - 4, topY + height - 10, 8, 18);
+
+    if (building.buildingType !== "wall" && building.buildingType !== "gate") {
+      graphics.fillStyle(palette.banner, building.completed ? 0.95 : 0.6);
+      graphics.fillRect(centerX + width * 0.22, bodyTop + 4, 8, 18);
+    }
+
+    switch (building.buildingType) {
+      case "abbeyHall":
+        graphics.fillStyle(palette.trim, 0.9);
+        graphics.fillCircle(centerX - width * 0.26, topY + 12, 9);
+        graphics.fillStyle(palette.accent, 1);
+        graphics.fillRect(centerX + width * 0.08, bodyTop + 2, 24, 10);
+        break;
+      case "barracks":
+        graphics.fillStyle(palette.accent, 1);
+        graphics.fillRect(centerX - 2, bodyTop + 4, 4, 28);
+        graphics.fillRect(centerX - 15, bodyTop + 14, 30, 4);
+        break;
+      case "range":
+        graphics.fillStyle(palette.trim, 1);
+        graphics.fillCircle(centerX, bodyTop + 16, 11);
+        graphics.fillStyle(palette.accent, 1);
+        graphics.fillCircle(centerX, bodyTop + 16, 5);
+        break;
+      case "blacksmith":
+        graphics.fillStyle(0x37261a, 1);
+        graphics.fillRect(centerX + width * 0.2, topY - 8, 12, 26);
+        graphics.fillStyle(palette.accent, 0.95);
+        graphics.fillCircle(centerX - width * 0.16, bodyTop + 18, 8);
+        break;
+      case "granary":
+        graphics.fillStyle(palette.accent, 1);
+        graphics.fillCircle(centerX - 10, bodyTop + 18, 6);
+        graphics.fillCircle(centerX + 4, bodyTop + 20, 7);
+        break;
+      case "storehouse":
+        graphics.fillStyle(palette.accent, 1);
+        graphics.fillRect(centerX - 14, bodyTop + 10, 10, 14);
+        graphics.fillRect(centerX + 2, bodyTop + 8, 10, 16);
+        break;
+      case "longPatrolLodge":
+        graphics.fillStyle(palette.banner, 1);
+        graphics.fillTriangle(centerX - 6, bodyTop + 4, centerX + 20, bodyTop + 10, centerX - 6, bodyTop + 18);
+        break;
+      case "tower":
+        graphics.fillStyle(palette.banner, 1);
+        graphics.fillRect(centerX + 10, topY + 10, 7, 18);
+        break;
+      case "wall":
+        graphics.fillStyle(palette.trim, 0.9);
+        graphics.fillRect(centerX - width / 2 + 6, bodyTop + 8, width - 12, 8);
+        break;
+      case "gate":
+        graphics.fillStyle(0x25170f, 1);
+        graphics.fillRect(centerX - 12, bodyTop + 6, 24, 20);
+        graphics.lineStyle(2, palette.trim, 0.95);
+        graphics.beginPath();
+        graphics.arc(centerX, bodyTop + 12, 12, Math.PI, Math.PI * 2, false);
+        graphics.strokePath();
+        break;
+      case "workshop":
+        graphics.fillStyle(palette.trim, 1);
+        graphics.fillCircle(centerX - 12, bodyTop + 18, 9);
+        graphics.fillStyle(palette.accent, 1);
+        graphics.fillCircle(centerX - 12, bodyTop + 18, 3);
+        graphics.lineStyle(2, palette.accent, 0.9);
+        graphics.strokeLineShape(new Phaser.Geom.Line(centerX - 12, bodyTop + 9, centerX - 12, bodyTop + 27));
+        graphics.strokeLineShape(new Phaser.Geom.Line(centerX - 21, bodyTop + 18, centerX - 3, bodyTop + 18));
+        break;
+      default:
+        graphics.fillStyle(palette.trim, 0.85);
+        graphics.fillRect(centerX - 16, bodyTop + 8, 8, 8);
+        graphics.fillRect(centerX + 8, bodyTop + 8, 8, 8);
+        break;
+    }
+  }
+
+  private drawBuildingStatusBars(graphics: Phaser.GameObjects.Graphics, building: BuildingEntity, centerX: number, topY: number, width: number): void {
     graphics.fillStyle(0x20160f, 1);
-    graphics.fillRect(point.x - width / 2, point.y - 28, width, 6);
+    graphics.fillRect(centerX - width / 2, topY - 10, width, 6);
     graphics.fillStyle(0x78b66f, 1);
-    graphics.fillRect(point.x - width / 2, point.y - 28, width * Math.max(0, building.hp) / building.maxHp, 6);
+    graphics.fillRect(centerX - width / 2, topY - 10, width * Math.max(0, building.hp) / building.maxHp, 6);
+
+    const totalMs = !building.completed
+      ? BUILDING_DEFINITIONS[building.buildingType].buildTimeMs
+      : getQueueItemTotalMs(building);
+    if (!totalMs) {
+      return;
+    }
+    const progress = !building.completed
+      ? building.buildProgressMs / Math.max(1, totalMs)
+      : (totalMs - building.queue[0].remainingMs) / Math.max(1, totalMs);
+    const barColor = !building.completed
+      ? 0xd0a35b
+      : building.queue[0].kind === "research"
+        ? 0x87c07a
+        : building.queue[0].kind === "age"
+          ? 0xe0c879
+          : 0x7aa6d0;
+
+    graphics.fillStyle(0x20160f, 0.95);
+    graphics.fillRect(centerX - width / 2, topY - 2, width, 5);
+    graphics.fillStyle(barColor, 1);
+    graphics.fillRect(centerX - width / 2, topY - 2, width * clamp(progress, 0, 1), 5);
+
+    const queuedCount = building.queue.length;
+    if (queuedCount > 1) {
+      for (let index = 1; index < Math.min(queuedCount, 4); index += 1) {
+        graphics.fillStyle(0xe8d8aa, 0.85);
+        graphics.fillCircle(centerX + width / 2 - index * 10, topY - 18, 3);
+      }
+    }
   }
 
   private drawUnit(graphics: Phaser.GameObjects.Graphics, unit: UnitEntity, selected: boolean): void {
     const point = this.tileToScreen(unit.position);
-    const fillColor = unit.playerId === "player" ? 0xf4d28f : 0xc45454;
+    const palette = getUnitPalette(unit);
+    const size = unit.unitType === "badgerChampion" ? 16 : unit.unitType === "ramCart" ? 17 : unit.unitType === "hareRunner" ? 13 : 11;
     if (selected) {
       graphics.lineStyle(2, 0xf2dfa8, 1);
       graphics.strokeEllipse(point.x, point.y + 14, 36, 16);
     }
-    graphics.fillStyle(fillColor, 1);
-    graphics.fillCircle(point.x, point.y + 4, unit.unitType === "badgerChampion" ? 16 : unit.unitType === "ramCart" ? 15 : 11);
-    graphics.fillStyle(unit.playerId === "player" ? 0x405a48 : 0x5a2020, 1);
-    if (UNIT_DEFINITIONS[unit.unitType].tags.includes("ranged")) {
-      graphics.fillRect(point.x - 10, point.y - 10, 20, 6);
+    graphics.fillStyle(palette.shadow, 0.25);
+    graphics.fillEllipse(point.x, point.y + 16, size * 2.2, 10);
+
+    if (unit.unitType === "ramCart") {
+      graphics.fillStyle(palette.fur, 1);
+      graphics.fillRoundedRect(point.x - 16, point.y - 2, 32, 16, 5);
+      graphics.fillStyle(palette.cloth, 1);
+      graphics.fillTriangle(point.x + 8, point.y + 4, point.x + 26, point.y + 10, point.x + 8, point.y + 16);
+      graphics.fillStyle(palette.metal, 1);
+      graphics.fillCircle(point.x - 10, point.y + 16, 5);
+      graphics.fillCircle(point.x + 10, point.y + 16, 5);
     } else {
-      graphics.fillRect(point.x - 6, point.y - 14, 12, 18);
+      graphics.fillStyle(palette.cloth, 1);
+      graphics.fillEllipse(point.x, point.y + 5, size * 1.6, size * 1.9);
+      graphics.fillStyle(palette.fur, 1);
+      graphics.fillCircle(point.x, point.y - 7, size * 0.58);
+
+      if (unit.unitType === "hareRunner") {
+        graphics.fillStyle(palette.fur, 1);
+        graphics.fillTriangle(point.x - 6, point.y - 10, point.x - 2, point.y - 28, point.x + 1, point.y - 10);
+        graphics.fillTriangle(point.x + 2, point.y - 10, point.x + 6, point.y - 30, point.x + 9, point.y - 10);
+      }
+      if (unit.unitType === "shrewScout") {
+        graphics.lineStyle(2, palette.accent, 0.9);
+        graphics.strokeLineShape(new Phaser.Geom.Line(point.x - 4, point.y + 8, point.x - 16, point.y + 18));
+      }
+      if (unit.unitType === "badgerChampion") {
+        graphics.fillStyle(0x1c1c1c, 1);
+        graphics.fillRect(point.x - 2, point.y - 13, 4, 12);
+        graphics.fillRect(point.x - 10, point.y - 11, 4, 8);
+        graphics.fillRect(point.x + 6, point.y - 11, 4, 8);
+      }
+      if (UNIT_DEFINITIONS[unit.unitType].tags.includes("ranged")) {
+        graphics.lineStyle(2, palette.accent, 0.95);
+        graphics.strokeLineShape(new Phaser.Geom.Line(point.x + 8, point.y - 2, point.x + 16, point.y + 10));
+        graphics.strokeLineShape(new Phaser.Geom.Line(point.x + 16, point.y - 2, point.x + 16, point.y + 10));
+      } else if (unit.unitType === "worker") {
+        graphics.fillStyle(palette.accent, 1);
+        graphics.fillRect(point.x + 8, point.y - 6, 3, 18);
+        graphics.fillRect(point.x + 5, point.y - 8, 10, 4);
+      } else {
+        graphics.fillStyle(palette.metal, 1);
+        graphics.fillRect(point.x + 8, point.y - 8, 3, 22);
+        if (unit.unitType === "shieldbearer") {
+          graphics.fillStyle(palette.accent, 1);
+          graphics.fillCircle(point.x - 10, point.y + 4, 8);
+        }
+      }
     }
+
+    graphics.fillStyle(palette.accent, 0.9);
+    graphics.fillRect(point.x - 4, point.y - 1, 8, 10);
     graphics.fillStyle(0x20160f, 1);
     graphics.fillRect(point.x - 16, point.y - 24, 32, 5);
     graphics.fillStyle(0x79bb72, 1);
@@ -379,21 +717,35 @@ export class RedwallScene extends Phaser.Scene {
       return;
     }
     const point = this.tileToScreen({ x: entity.tile.x + 0.5, y: entity.tile.y + 0.5 });
-    const fillColor =
-      entity.resourceType === "food"
-        ? 0xd5965c
-        : entity.resourceType === "timber"
-          ? 0x47754f
-          : entity.resourceType === "stone"
-            ? 0x8f8a7c
-            : 0xa97b58;
-    graphics.fillStyle(fillColor, 1);
+    graphics.fillStyle(0x14100d, 0.2);
+    graphics.fillEllipse(point.x, point.y + 18, 26, 10);
+
     if (entity.resourceType === "timber") {
-      graphics.fillTriangle(point.x - 14, point.y + 6, point.x, point.y - 18, point.x + 14, point.y + 6);
-      graphics.fillTriangle(point.x - 12, point.y - 2, point.x, point.y - 24, point.x + 12, point.y - 2);
-    } else {
-      graphics.fillCircle(point.x, point.y + 6, 13);
+      graphics.fillStyle(0x5f3e25, 1);
+      graphics.fillRect(point.x - 4, point.y - 4, 8, 26);
+      graphics.fillStyle(0x426a43, 1);
+      graphics.fillTriangle(point.x - 20, point.y + 8, point.x, point.y - 22, point.x + 20, point.y + 8);
+      graphics.fillTriangle(point.x - 16, point.y - 2, point.x, point.y - 32, point.x + 16, point.y - 2);
+      return;
     }
+
+    if (entity.resourceType === "food") {
+      graphics.fillStyle(0x5b844f, 1);
+      graphics.fillCircle(point.x - 8, point.y + 6, 10);
+      graphics.fillCircle(point.x + 2, point.y + 2, 12);
+      graphics.fillCircle(point.x + 11, point.y + 8, 9);
+      graphics.fillStyle(0xd38d56, 1);
+      graphics.fillCircle(point.x - 4, point.y + 10, 3);
+      graphics.fillCircle(point.x + 6, point.y + 5, 3);
+      graphics.fillCircle(point.x + 10, point.y + 13, 3);
+      return;
+    }
+
+    graphics.fillStyle(entity.resourceType === "stone" ? 0x9b978b : 0x7d685c, 1);
+    graphics.fillTriangle(point.x - 16, point.y + 12, point.x - 4, point.y - 8, point.x + 6, point.y + 12);
+    graphics.fillTriangle(point.x - 2, point.y + 14, point.x + 10, point.y - 12, point.x + 18, point.y + 14);
+    graphics.fillStyle(entity.resourceType === "stone" ? 0xc1bbad : 0xcd8458, 1);
+    graphics.fillCircle(point.x + 8, point.y + 4, 4);
   }
 
   private handleSelection(tile: TilePoint): void {

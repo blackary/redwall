@@ -12,6 +12,32 @@ function formatLabel(identifier: string): string {
   return identifier.replace(/[A-Z]/g, (match) => ` ${match}`).replace(/^./, (char) => char.toUpperCase());
 }
 
+function formatDuration(ms: number): string {
+  return `${Math.max(0.2, ms / 1000).toFixed(1)}s`;
+}
+
+function getQueuedItemLabel(item: BuildingEntity["queue"][number]): string {
+  if (item.kind === "unit") {
+    return UNIT_DEFINITIONS[item.id as UnitType].label;
+  }
+  if (item.kind === "research") {
+    return RESEARCH_DEFINITIONS[item.id as ResearchId].label;
+  }
+  return item.id === "abbey" ? "Advance to Abbey Age" : "Advance to Warhost Age";
+}
+
+function getQueuedItemTotalMs(item: BuildingEntity["queue"][number]): number {
+  if (item.kind === "unit") {
+    return UNIT_DEFINITIONS[item.id as UnitType].trainTimeMs;
+  }
+  if (item.kind === "research") {
+    return RESEARCH_DEFINITIONS[item.id as ResearchId].researchTimeMs;
+  }
+  return item.id === "abbey"
+    ? RESEARCH_DEFINITIONS.abbeyAge.researchTimeMs
+    : RESEARCH_DEFINITIONS.warhostAge.researchTimeMs;
+}
+
 interface HudOptions {
   settings: GameSettings;
   onSaveAndExit: () => Promise<unknown> | void;
@@ -209,6 +235,7 @@ export class Hud {
         <div class="selection-meta">${entity.completed ? "Operational" : "Under construction"}</div>
         <div class="selection-health">${Math.round(entity.hp)}/${entity.maxHp} hp</div>
       `;
+      card.append(this.renderBuildingWorkState(entity));
       return card;
     }
     card.innerHTML = `
@@ -216,6 +243,81 @@ export class Hud {
       <div class="selection-meta">${entity.amount}/${entity.maxAmount} remaining</div>
     `;
     return card;
+  }
+
+  private renderBuildingWorkState(building: BuildingEntity): HTMLDivElement {
+    const panel = document.createElement("div");
+    panel.className = "work-state";
+
+    if (!building.completed) {
+      const totalMs = Math.max(1, BUILDING_DEFINITIONS[building.buildingType].buildTimeMs);
+      const progress = Math.min(1, building.buildProgressMs / totalMs);
+      panel.append(this.createProgressBlock("Construction", `${Math.round(progress * 100)}%`, progress, `${formatDuration(totalMs - building.buildProgressMs)} remaining`));
+      return panel;
+    }
+
+    if (building.queue.length === 0) {
+      panel.innerHTML = `
+        <div class="work-row">
+          <span class="work-label" data-testid="work-label">Idle</span>
+          <strong data-testid="work-progress-value">Ready</strong>
+        </div>
+        <p class="hint" data-testid="work-queue">No queued tasks.</p>
+      `;
+      return panel;
+    }
+
+    const active = building.queue[0];
+    const totalMs = Math.max(1, getQueuedItemTotalMs(active));
+    const progress = Math.min(1, Math.max(0, (totalMs - active.remainingMs) / totalMs));
+    const statusLabel = active.kind === "unit"
+      ? "Training"
+      : active.kind === "research"
+        ? "Researching"
+        : "Advancing";
+
+    panel.append(
+      this.createProgressBlock(
+        `${statusLabel}: ${getQueuedItemLabel(active)}`,
+        `${Math.round(progress * 100)}%`,
+        progress,
+        `${formatDuration(active.remainingMs)} remaining`,
+      ),
+    );
+
+    const queuedItems = building.queue.slice(1).map((item) => getQueuedItemLabel(item));
+    const queueSummary = document.createElement("p");
+    queueSummary.className = "hint";
+    queueSummary.dataset.testid = "work-queue";
+    queueSummary.textContent = queuedItems.length > 0
+      ? `Queued next: ${queuedItems.join(" -> ")}`
+      : "Queue ends after the current task.";
+    panel.append(queueSummary);
+    return panel;
+  }
+
+  private createProgressBlock(label: string, value: string, progress: number, subtitle: string): HTMLDivElement {
+    const wrapper = document.createElement("div");
+    wrapper.className = "progress-block";
+
+    const row = document.createElement("div");
+    row.className = "work-row";
+    row.innerHTML = `
+      <span class="work-label" data-testid="work-label">${label}</span>
+      <strong data-testid="work-progress-value">${value}</strong>
+    `;
+
+    const track = document.createElement("div");
+    track.className = "progress-track";
+    track.innerHTML = `<div class="progress-fill" style="width: ${Math.max(4, progress * 100)}%"></div>`;
+
+    const meta = document.createElement("div");
+    meta.className = "selection-meta";
+    meta.dataset.testid = "work-eta";
+    meta.textContent = subtitle;
+
+    wrapper.append(row, track, meta);
+    return wrapper;
   }
 
   private renderActions(entity: Entity): void {

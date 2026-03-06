@@ -8,6 +8,8 @@ Browser-only real-time strategy prototype inspired by Age of Empires, reframed a
 - Isometric 1v1 skirmish on `Mossflower Meadows`
 - Three ages: `Settlement`, `Abbey`, `Warhost`
 - Economy, building placement, unit production, ranged/melee combat, towers, and fog of war
+- Original stylized in-engine art for units, buildings, terrain, and resources
+- Building work-state UI for construction, training, research, and age-up progress
 - Local resume via IndexedDB + localStorage metadata
 - GitHub Pages deployment workflow that publishes the built `dist/` artifact
 
@@ -51,6 +53,7 @@ The Playwright suite covers:
 - bootstrap and menu flow
 - camera/selection/movement loop
 - economy + autosave/resume
+- production queue visibility
 - AI skirmish expansion/pressure
 
 ## GitHub Pages
