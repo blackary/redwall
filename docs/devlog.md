@@ -125,3 +125,9 @@
 - Tests run: `npm test`; `npm run test:e2e`; `npm run build`
 - Known gaps: Click targeting now matches the visible battlefield much more closely on the tested layouts, but there is still room for future polish like hover outlines and tighter sprite-specific pick masks on dense late-game armies.
 - Commit hash: `3db3f9b`
+
+## 2026-03-07 Hover Preview and Armed Controls Pass
+- Summary: Added live battlefield hover previews for friendly units, enemy targets, resources, and build placement validity; surfaced the current hover state through the debug API for browser regression coverage; marked armed build and command palette buttons with a persistent active state; and hardened the resume regression so the suite waits for the restored snapshot to settle before comparing saved state.
+- Tests run: `npm test`; `npm run test:e2e`; `npm run build`
+- Known gaps: The battlefield now previews intent before clicks land, but later control polish can still add richer hover art, sprite-level occlusion hints, and more explicit invalid-target messaging for edge cases like blocked rally points.
+- Commit hash: `546d017`
