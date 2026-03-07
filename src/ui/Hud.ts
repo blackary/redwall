@@ -551,7 +551,7 @@ export class Hud {
       case "gather":
         return "Gather Mode";
       case "attack":
-        return "Patrol Mode";
+        return "Attack Mode";
       case "rally":
         return "Rally Mode";
       default:
@@ -615,7 +615,7 @@ export class Hud {
     if (single.kind === "unit") {
       return UNIT_DEFINITIONS[single.unitType].tags.includes("worker")
         ? "Workers use the Command Palette below. Tasking buttons auto-assign resources, and Construction buttons arm building placement."
-        : "Troops respond best to right click context orders or Patrol from the Command Palette.";
+        : "Troops respond best to right click context orders or Attack from the Command Palette.";
     }
     return "Production buildings show queue progress here. Use the Command Palette to train, research, and set rally points.";
   }
@@ -1261,13 +1261,13 @@ export class Hud {
         ],
       },
       {
-        label: "Patrol",
+        label: "Attack",
         testId: units.length === 1 ? "action-mode-attack" : "action-group-attack",
         action: () => this.session.setCommandMode("attack"),
-        detail: "Attack move",
+        detail: "Attack order",
         tone: "command",
         categoryLabel: "Orders",
-        description: "Attack-moves the selected troops toward a destination and engages enemies encountered on the route.",
+        description: "Orders selected troops to attack an enemy target directly, or attack-move toward a ground destination if you click open terrain.",
         detailRows: [
           { label: "Use", value: "Left click ground or enemy" },
           { label: "Hotkey", value: "E" },

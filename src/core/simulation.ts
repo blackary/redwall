@@ -99,6 +99,56 @@ function getBuildingFootprintTiles(building: BuildingEntity): TilePoint[] {
   return tiles;
 }
 
+function getBuildingTargetPoint(building: BuildingEntity, from: { x: number; y: number }): { x: number; y: number } {
+  const definition = BUILDING_DEFINITIONS[building.buildingType];
+  return {
+    x: Math.max(building.tile.x + 0.5, Math.min(building.tile.x + definition.footprint.x - 0.5, from.x)),
+    y: Math.max(building.tile.y + 0.5, Math.min(building.tile.y + definition.footprint.y - 0.5, from.y)),
+  };
+}
+
+function getBuildingApproachTile(
+  map: MapData,
+  occupancy: boolean[],
+  building: BuildingEntity,
+  from: { x: number; y: number },
+  attackRange: number,
+): TilePoint | undefined {
+  const definition = BUILDING_DEFINITIONS[building.buildingType];
+  const candidates: TilePoint[] = [];
+  for (let tileX = building.tile.x - 1; tileX <= building.tile.x + definition.footprint.x; tileX += 1) {
+    for (let tileY = building.tile.y - 1; tileY <= building.tile.y + definition.footprint.y; tileY += 1) {
+      if (tileX < 0 || tileY < 0 || tileX >= map.width || tileY >= map.height) {
+        continue;
+      }
+      const insideFootprint = tileX >= building.tile.x
+        && tileY >= building.tile.y
+        && tileX < building.tile.x + definition.footprint.x
+        && tileY < building.tile.y + definition.footprint.y;
+      if (insideFootprint || occupancy[tileY * map.width + tileX]) {
+        continue;
+      }
+      candidates.push({ x: tileX, y: tileY });
+    }
+  }
+
+  if (candidates.length === 0) {
+    return undefined;
+  }
+
+  const inRangeCandidates = candidates.filter((tile) => {
+    const tileCenter = { x: tile.x + 0.5, y: tile.y + 0.5 };
+    return getDistance(tileCenter, getBuildingTargetPoint(building, tileCenter)) <= attackRange + 0.05;
+  });
+  const pool = inRangeCandidates.length > 0 ? inRangeCandidates : candidates;
+  pool.sort((left, right) => {
+    const leftCenter = { x: left.x + 0.5, y: left.y + 0.5 };
+    const rightCenter = { x: right.x + 0.5, y: right.y + 0.5 };
+    return getDistance(from, leftCenter) - getDistance(from, rightCenter);
+  });
+  return pool[0];
+}
+
 function getUnitTile(unit: UnitEntity): TilePoint {
   return { x: Math.round(unit.position.x), y: Math.round(unit.position.y) };
 }
@@ -836,14 +886,21 @@ export class Simulation {
       unit.order = { type: "idle" };
       return;
     }
-    const targetPosition = target.kind === "unit"
-      ? target.position
-      : { x: target.tile.x + 0.5, y: target.tile.y + 0.5 };
     const unitPosition = unit.position;
     const definition = this.getModifiedUnitDefinition(unit.playerId, unit.unitType);
+    const targetPosition = target.kind === "unit"
+      ? target.position
+      : getBuildingTargetPoint(target, unitPosition);
     const distance = getDistance(unitPosition, targetPosition);
     if (distance > definition.attackRange) {
-      this.moveUnitAlongPath(unit, { x: Math.round(targetPosition.x), y: Math.round(targetPosition.y) }, _deltaMs, occupancy);
+      const destination = target.kind === "unit"
+        ? { x: Math.round(target.position.x), y: Math.round(target.position.y) }
+        : getBuildingApproachTile(this.world.map, occupancy, target, unitPosition, definition.attackRange);
+      if (!destination) {
+        unit.path = [];
+        return;
+      }
+      this.moveUnitAlongPath(unit, destination, _deltaMs, occupancy);
       return;
     }
     unit.path = [];
@@ -872,7 +929,7 @@ export class Simulation {
       if (!target || (target.kind !== "unit" && target.kind !== "building")) {
         continue;
       }
-      const targetPosition = target.kind === "unit" ? target.position : { x: target.tile.x + 0.5, y: target.tile.y + 0.5 };
+      const targetPosition = target.kind === "unit" ? target.position : getBuildingTargetPoint(target, projectile.position);
       const distance = getDistance(projectile.position, targetPosition);
       const travel = (projectile.speed * deltaMs) / 1000;
       if (distance <= travel) {
@@ -923,7 +980,7 @@ export class Simulation {
       if ((entity.kind !== "unit" && entity.kind !== "building") || entity.playerId === playerId) {
         continue;
       }
-      const targetPosition = entity.kind === "unit" ? entity.position : { x: entity.tile.x + 0.5, y: entity.tile.y + 0.5 };
+      const targetPosition = entity.kind === "unit" ? entity.position : getBuildingTargetPoint(entity, position);
       const distance = getDistance(position, targetPosition);
       if (distance <= bestDistance) {
         bestDistance = distance;

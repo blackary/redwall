@@ -9,6 +9,12 @@ import { getUnitAnimationState, type UnitAnimationState } from "./animation";
 import { getBoxSelectionIds } from "./selection";
 
 type Ping = { tile: TilePoint; ttlMs: number };
+type TargetHighlightTone = "attack" | "gather";
+type TargetIndicator = {
+  id: string;
+  tone: TargetHighlightTone;
+  source: "issued" | "selected";
+};
 type BuildingPalette = {
   wall: number;
   roof: number;
@@ -176,6 +182,7 @@ export class RedwallScene extends Phaser.Scene {
   private lastSelectionClick?: { entityId: string; atMs: number };
   private readonly hitFlashes = new Map<string, number>();
   private readonly previousHpByEntity = new Map<string, number>();
+  private readonly targetHighlights = new Map<string, { tone: TargetHighlightTone; untilMs: number }>();
 
   public constructor(session: GameSession, settings: GameSettings) {
     super("battlefield");
@@ -307,6 +314,7 @@ export class RedwallScene extends Phaser.Scene {
     this.pings = this.pings
       .map((ping) => ({ ...ping, ttlMs: ping.ttlMs - delta }))
       .filter((ping) => ping.ttlMs > 0);
+    this.cleanupTargetHighlights(this.session.getWorld());
   }
 
   public getScreenPointForTile(tile: TilePoint): TilePoint {
@@ -339,6 +347,12 @@ export class RedwallScene extends Phaser.Scene {
       return undefined;
     }
     return getUnitAnimationState(entity, this.time.now, { reducedMotion: this.settings.reducedMotion });
+  }
+
+  public getTargetIndicators(): TargetIndicator[] {
+    const selectedIds = this.session.getSessionState().selectedIds;
+    return this.collectTargetIndicators(this.session.getWorld(), selectedIds)
+      .map(({ emphasis: _emphasis, ...indicator }) => indicator);
   }
 
   public selectInScreenRect(from: TilePoint, to: TilePoint): void {
@@ -559,6 +573,14 @@ export class RedwallScene extends Phaser.Scene {
       const alpha = this.settings.reducedMotion ? 0.85 : ping.ttlMs / 1800;
       graphics.lineStyle(2, 0xf2dfa8, alpha);
       graphics.strokeCircle(point.x, point.y + 12, radius);
+    }
+
+    for (const indicator of this.collectTargetIndicators(world, selectedIds)) {
+      const entity = world.entities[indicator.id];
+      if (!entity || !this.isEntityVisibleToPlayer(world, entity)) {
+        continue;
+      }
+      this.drawTargetIndicator(graphics, entity, indicator.tone, indicator.emphasis);
     }
 
     if (selectedIds.length === 0) {
@@ -1282,9 +1304,13 @@ export class RedwallScene extends Phaser.Scene {
     }
     const entity = this.findTargetAtPoint(worldX, worldY, tile);
     if (entity?.kind === "resource") {
-      this.session.issueCommand({ type: "gather", unitIds, targetId: entity.id });
+      if (this.session.issueCommand({ type: "gather", unitIds, targetId: entity.id })) {
+        this.markTargetHighlight(entity.id, "gather");
+      }
     } else if ((entity?.kind === "unit" || entity?.kind === "building") && entity.playerId === "ai") {
-      this.session.issueCommand({ type: "attack", unitIds, targetId: entity.id });
+      if (this.session.issueCommand({ type: "attack", unitIds, targetId: entity.id })) {
+        this.markTargetHighlight(entity.id, "attack");
+      }
     } else {
       this.session.issueCommand({ type: "move", unitIds, destination: tile });
       this.pings.push({ tile, ttlMs: 1800 });
@@ -1320,13 +1346,17 @@ export class RedwallScene extends Phaser.Scene {
     }
 
     if (sessionState.commandMode === "gather" && unitIds.length > 0 && target?.kind === "resource") {
-      this.session.issueCommand({ type: "gather", unitIds, targetId: target.id });
+      if (this.session.issueCommand({ type: "gather", unitIds, targetId: target.id })) {
+        this.markTargetHighlight(target.id, "gather");
+      }
       return;
     }
 
     if (sessionState.commandMode === "attack" && unitIds.length > 0) {
       if ((target?.kind === "unit" || target?.kind === "building") && target.playerId === "ai") {
-        this.session.issueCommand({ type: "attack", unitIds, targetId: target.id });
+        if (this.session.issueCommand({ type: "attack", unitIds, targetId: target.id })) {
+          this.markTargetHighlight(target.id, "attack");
+        }
       } else {
         this.session.issueCommand({ type: "attackMove", unitIds, destination: tile });
       }
@@ -1408,6 +1438,112 @@ export class RedwallScene extends Phaser.Scene {
   private selectEntitiesInWorldRect(from: TilePoint, to: TilePoint): void {
     const selectedIds = getBoxSelectionIds(this.session.getWorld(), from, to, (tile) => this.tileToScreen(tile));
     this.session.setSelection(selectedIds);
+  }
+
+  private markTargetHighlight(entityId: string, tone: TargetHighlightTone): void {
+    this.targetHighlights.set(entityId, {
+      tone,
+      untilMs: this.time.now + 1800,
+    });
+  }
+
+  private collectTargetIndicators(world: WorldState, selectedIds: string[]): Array<TargetIndicator & { emphasis: number }> {
+    const indicators = new Map<string, TargetIndicator & { emphasis: number }>();
+    const now = this.time.now;
+
+    for (const [entityId, highlight] of this.targetHighlights.entries()) {
+      if (highlight.untilMs <= now || !world.entities[entityId]) {
+        continue;
+      }
+      indicators.set(entityId, {
+        id: entityId,
+        tone: highlight.tone,
+        source: "issued",
+        emphasis: clamp((highlight.untilMs - now) / 1800, 0.55, 1),
+      });
+    }
+
+    for (const selectedId of selectedIds) {
+      const entity = world.entities[selectedId];
+      if (!entity || entity.kind !== "unit") {
+        continue;
+      }
+      if (entity.order.type !== "attack" && entity.order.type !== "gather") {
+        continue;
+      }
+      const target = world.entities[entity.order.targetId];
+      if (!target) {
+        continue;
+      }
+      const tone: TargetHighlightTone = entity.order.type === "attack" ? "attack" : "gather";
+      const existing = indicators.get(target.id);
+      indicators.set(target.id, {
+        id: target.id,
+        tone,
+        source: existing?.source ?? "selected",
+        emphasis: Math.max(existing?.emphasis ?? 0, 0.78),
+      });
+    }
+
+    return [...indicators.values()];
+  }
+
+  private drawTargetIndicator(
+    graphics: Phaser.GameObjects.Graphics,
+    entity: Entity,
+    tone: TargetHighlightTone,
+    emphasis: number,
+  ): void {
+    const color = tone === "attack" ? 0xdb6c5f : 0x90c46b;
+    const pulse = this.settings.reducedMotion ? 0.92 : 0.76 + ((Math.sin(this.time.now / 140) + 1) * 0.5) * 0.24;
+    const alpha = clamp(emphasis * pulse, 0.45, 1);
+
+    if (entity.kind === "building") {
+      const footprint = BUILDING_DEFINITIONS[entity.buildingType].footprint;
+      const corners = [
+        this.tileToScreen({ x: entity.tile.x, y: entity.tile.y }),
+        this.tileToScreen({ x: entity.tile.x + footprint.x, y: entity.tile.y }),
+        this.tileToScreen({ x: entity.tile.x + footprint.x, y: entity.tile.y + footprint.y }),
+        this.tileToScreen({ x: entity.tile.x, y: entity.tile.y + footprint.y }),
+      ];
+      graphics.fillStyle(color, tone === "attack" ? 0.08 : 0.06);
+      graphics.lineStyle(3, color, alpha);
+      graphics.beginPath();
+      graphics.moveTo(corners[0].x, corners[0].y);
+      for (const corner of corners.slice(1)) {
+        graphics.lineTo(corner.x, corner.y);
+      }
+      graphics.closePath();
+      graphics.fillPath();
+      graphics.strokePath();
+
+      const center = this.tileToScreen({
+        x: entity.tile.x + footprint.x / 2,
+        y: entity.tile.y + footprint.y / 2,
+      });
+      const radius = 18 + Math.max(footprint.x, footprint.y) * 12 + pulse * 8;
+      graphics.lineStyle(2, color, clamp(alpha * 0.85, 0.45, 0.92));
+      graphics.strokeCircle(center.x, center.y + 12, radius);
+      return;
+    }
+
+    const point = entity.kind === "unit"
+      ? this.tileToScreen(entity.position)
+      : this.tileToScreen({ x: entity.tile.x + 0.5, y: entity.tile.y + 0.5 });
+    const radius = entity.kind === "unit" ? 16 + pulse * 7 : 14 + pulse * 5;
+    graphics.lineStyle(3, color, alpha);
+    graphics.strokeCircle(point.x, point.y + 12, radius);
+    graphics.lineStyle(2, color, clamp(alpha * 0.85, 0.45, 0.92));
+    graphics.strokeCircle(point.x, point.y + 12, Math.max(8, radius - 7));
+  }
+
+  private cleanupTargetHighlights(world: WorldState): void {
+    const now = this.time.now;
+    for (const [entityId, highlight] of [...this.targetHighlights.entries()]) {
+      if (highlight.untilMs <= now || !world.entities[entityId]) {
+        this.targetHighlights.delete(entityId);
+      }
+    }
   }
 
   private updateDamageFlashes(world: WorldState): void {

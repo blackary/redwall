@@ -107,4 +107,31 @@ describe("simulation economy and serialization", () => {
       || (resumedScout.kind === "unit" && aiScout?.kind === "unit" && resumedScout.hp < aiScout.hp),
     ).toBe(true);
   });
+
+  test("units can path to and damage enemy buildings", () => {
+    const simulation = new Simulation(createConfig("building-attack"));
+    const world = simulation.getWorld();
+    const playerScout = Object.values(world.entities).find((entity) => entity.kind === "unit" && entity.playerId === "player" && entity.unitType === "shrewScout");
+    const aiHall = Object.values(world.entities).find((entity) => entity.kind === "building" && entity.playerId === "ai" && entity.buildingType === "abbeyHall");
+
+    expect(playerScout).toBeTruthy();
+    expect(aiHall).toBeTruthy();
+    if (!playerScout || playerScout.kind !== "unit" || !aiHall || aiHall.kind !== "building") {
+      return;
+    }
+
+    playerScout.position = { x: aiHall.tile.x - 4.5, y: aiHall.tile.y + 1.5 };
+    const before = aiHall.hp;
+
+    simulation.issueCommand({ type: "attack", unitIds: [playerScout.id], targetId: aiHall.id });
+    simulation.advanceTicks(80);
+
+    const updatedHall = simulation.getSnapshot().entities[aiHall.id];
+    expect(updatedHall).toBeTruthy();
+    expect(updatedHall?.kind).toBe("building");
+    if (!updatedHall || updatedHall.kind !== "building") {
+      return;
+    }
+    expect(updatedHall.hp).toBeLessThan(before);
+  });
 });
