@@ -101,3 +101,9 @@
 - Tests run: `npm test`; `npm run test:e2e`; `npm run build`
 - Known gaps: The command palette is now explicit and clickable, but follow-up work can still add deeper submenus, multi-step production tabs, and richer contextual portraits/icons for each action family.
 - Commit hash: `6686f1c`
+
+## 2026-03-06 Building Attack and Target Lock Feedback
+- Summary: Fixed combat pathing and range checks so units can reliably attack multi-tile buildings from reachable edge tiles, added explicit attack and gather target-lock highlights in the battlefield renderer, exposed target indicators through the debug surface, and added core plus Playwright coverage for building attack and target feedback.
+- Tests run: `npm test`; `npm run test:e2e`; `npm run build`
+- Known gaps: Target lock is now explicit once an order lands, but a later UX pass can still add hover previews and more precise sprite-level click affordances for dense overlapping targets.
+- Commit hash: `907fe9f`
