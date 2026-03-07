@@ -191,6 +191,27 @@ export class GameSession {
     this.notify();
   }
 
+  public teleportUnits(unitIds: string[], destination: TilePoint): void {
+    const liveWorld = this.simulation.getWorld();
+    for (const [index, unitId] of unitIds.entries()) {
+      const entity = liveWorld.entities[unitId];
+      if (!entity || entity.kind !== "unit") {
+        continue;
+      }
+      const column = index % 3;
+      const row = Math.floor(index / 3);
+      entity.position = {
+        x: destination.x + column * 0.45,
+        y: destination.y + row * 0.45,
+      };
+      entity.moveTarget = undefined;
+      entity.path = [];
+      entity.order = { type: "hold" };
+    }
+    this.dirty = true;
+    this.notify();
+  }
+
   private loop(timestamp: number): void {
     if (!this.started) {
       return;

@@ -37,26 +37,38 @@ describe("tutorial state", () => {
     expect(tutorialState?.completed).toBe(false);
     expect(tutorialState?.currentStep?.id).toBe("gather-food");
     expect(tutorialState?.steps[0]?.completed).toBe(true);
+    expect(tutorialState?.steps).toHaveLength(7);
+    expect(tutorialState?.currentStep?.how).toContain("Forage");
   });
 
-  test("completes after gathering, building, and training militia", () => {
+  test("completes after gathering, building, training, and issuing an attack order", () => {
     const simulation = new Simulation(createTutorialConfig("tutorial-complete"));
     const workerIds = Object.values(simulation.getSnapshot().entities)
       .filter((entity) => entity.kind === "unit" && entity.playerId === "player" && entity.unitType === "worker")
       .map((entity) => entity.id);
     const food = findEntity(simulation, "resource", (entity) => entity.resourceType === "food" && entity.tile.x <= 8);
+    const hall = findEntity(simulation, "building", (entity) => entity.playerId === "player" && entity.buildingType === "abbeyHall");
+    const enemyHall = findEntity(simulation, "building", (entity) => entity.playerId === "ai" && entity.buildingType === "abbeyHall");
 
     expect(workerIds.length).toBeGreaterThanOrEqual(3);
     expect(food?.id).toBeTruthy();
+    expect(hall?.id).toBeTruthy();
+    expect(enemyHall?.id).toBeTruthy();
+
     simulation.issueCommand({ type: "gather", unitIds: [workerIds[0]], targetId: food!.id });
     simulation.issueCommand({ type: "build", unitIds: [workerIds[1]], buildingType: "dormitory", tile: { x: 8, y: 4 } });
+    simulation.issueCommand({ type: "train", buildingId: hall!.id, unitType: "worker" });
     simulation.issueCommand({ type: "build", unitIds: [workerIds[2]], buildingType: "barracks", tile: { x: 10, y: 7 } });
     simulation.advanceTicks(60);
 
     const barracks = findEntity(simulation, "building", (entity) => entity.playerId === "player" && entity.buildingType === "barracks" && entity.completed);
     expect(barracks?.id).toBeTruthy();
     simulation.issueCommand({ type: "train", buildingId: barracks!.id, unitType: "militia" });
-    simulation.advanceTicks(8);
+    simulation.advanceTicks(24);
+
+    const militia = findEntity(simulation, "unit", (entity) => entity.playerId === "player" && entity.unitType === "militia");
+    expect(militia?.id).toBeTruthy();
+    simulation.issueCommand({ type: "attack", unitIds: [militia!.id], targetId: enemyHall!.id });
 
     const tutorialState = getTutorialState(simulation.getSnapshot(), []);
     expect(tutorialState?.completed).toBe(true);

@@ -45,6 +45,7 @@ type DebugApi = {
   getSettings: () => GameSettings;
   setPaused: (paused: boolean) => void;
   forceOutcome: (outcome: Outcome) => void;
+  teleportUnits: (unitIds: string[], destination: TilePoint) => void;
   getScreenPointForEntity: (id: string) => TilePoint | undefined;
   getScreenPointForTile: (tile: TilePoint) => TilePoint | undefined;
   selectInScreenRect: (from: TilePoint, to: TilePoint) => void;
@@ -141,6 +142,9 @@ export class RedwallApp {
       },
       forceOutcome: (outcome: Outcome) => {
         this.session?.forceOutcome(outcome);
+      },
+      teleportUnits: (unitIds: string[], destination: TilePoint) => {
+        this.session?.teleportUnits(unitIds, destination);
       },
       getScreenPointForEntity: (id: string) => this.scene?.getScreenPointForEntity(id),
       getScreenPointForTile: (tile: TilePoint) => this.scene?.getScreenPointForTile(tile),

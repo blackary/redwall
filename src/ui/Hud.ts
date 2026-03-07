@@ -2,7 +2,7 @@ import { GameSession } from "../app/GameSession";
 import { AGE_ORDER, BUILDING_DEFINITIONS, RESEARCH_DEFINITIONS, UNIT_DEFINITIONS } from "../core/content";
 import { getFactionAdjustedUnitDefinition, getFactionDefinition, getFactionPalette } from "../core/factions";
 import { getMapDefinition, tileIndex } from "../core/map";
-import { getTutorialState } from "../core/tutorial";
+import { getTutorialState, type TutorialStep } from "../core/tutorial";
 import type {
   Age,
   BuildingEntity,
@@ -1349,6 +1349,42 @@ export class Hud {
     }
   }
 
+  private getTutorialStepDetailMarkup(step: TutorialStep | undefined, completed: boolean): string {
+    if (!step) {
+      return completed
+        ? `
+            <div class="tutorial-detail-grid">
+              <div class="tutorial-detail-block">
+                <div class="sidebar-section-title">Why It Matters</div>
+                <p class="sidebar-copy">You have walked through the opening economy, first production, and first combat command.</p>
+              </div>
+              <div class="tutorial-detail-block">
+                <div class="sidebar-section-title">Next Habit</div>
+                <p class="sidebar-copy">Open real skirmishes by keeping workers active, adding population room early, and transitioning into troop production without floating resources.</p>
+              </div>
+            </div>
+          `
+        : "";
+    }
+
+    return `
+      <div class="tutorial-detail-grid">
+        <div class="tutorial-detail-block">
+          <div class="sidebar-section-title">Why It Matters</div>
+          <p class="sidebar-copy" data-testid="tutorial-why">${step.why}</p>
+        </div>
+        <div class="tutorial-detail-block">
+          <div class="sidebar-section-title">How To Do It</div>
+          <p class="sidebar-copy" data-testid="tutorial-how">${step.how}</p>
+        </div>
+        <div class="tutorial-detail-block">
+          <div class="sidebar-section-title">Success Check</div>
+          <p class="sidebar-copy" data-testid="tutorial-success">${step.success}</p>
+        </div>
+      </div>
+    `;
+  }
+
   private getSidebarGuidanceCard(isTutorial: boolean, tutorialState: ReturnType<typeof getTutorialState>): string {
     if (isTutorial && tutorialState) {
       return `
@@ -1360,6 +1396,7 @@ export class Hud {
               ? "Opening drill completed. Finish the tutorial from the top bar to unlock the next Chronicle content."
               : `${tutorialState.currentStep?.label}: ${tutorialState.currentStep?.description}`
           }</p>
+          ${this.getTutorialStepDetailMarkup(tutorialState.currentStep, tutorialState.completed)}
         </div>
       `;
     }
@@ -1392,6 +1429,7 @@ export class Hud {
           ? "Opening drill completed. Finish the tutorial to unlock Abbey Orchard and the Riverfolk Collective."
           : `${tutorialState.currentStep?.label}: ${tutorialState.currentStep?.description}`
       }</p>
+      ${this.getTutorialStepDetailMarkup(tutorialState.currentStep, tutorialState.completed)}
       <ol class="sidebar-steps tutorial-step-list">${items}</ol>
     `;
     return card;

@@ -567,6 +567,19 @@ select {
   gap: 6px;
 }
 
+.tutorial-detail-grid {
+  display: grid;
+  gap: 8px;
+}
+
+.tutorial-detail-block {
+  display: grid;
+  gap: 6px;
+  padding: 10px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.045);
+}
+
 .tutorial-step {
   color: #d7ceb7;
 }
