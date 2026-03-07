@@ -137,3 +137,9 @@
 - Tests run: `npm test`; `npm run test:e2e`; `npm run build`
 - Known gaps: Build placement feedback is now much clearer, but dense creature overlap can still benefit from stronger hover silhouettes and more explicit pre-click target emphasis in a future control pass.
 - Commit hash: `4fef1ab`
+
+## 2026-03-07 Hover and Click Coherence Pass
+- Summary: Added explicit hover action detail for units, buildings, resources, and attack targets; strengthened battlefield hover emphasis so hovered creatures and structures stand out more clearly; and made click selection prefer the currently hovered friendly target so what the player clicks matches what the battlefield is previewing.
+- Tests run: `npm test`; `npm run test:e2e`; `npm run build`
+- Known gaps: Hover and click targeting are now aligned much more closely, but a later polish pass can still add faction-specific portraits/icons and richer multi-unit formation selection feedback.
+- Commit hash: `0009203`
