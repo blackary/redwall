@@ -13,12 +13,14 @@ test("battlefield hover previews and armed build state stay clear", async ({ pag
 
     const hall = Object.values(snapshot.entities).find((entity) => entity.kind === "building" && entity.playerId === "player" && entity.buildingType === "abbeyHall");
     const worker = Object.values(snapshot.entities).find((entity) => entity.kind === "unit" && entity.playerId === "player" && entity.unitType === "worker");
-    if (!hall || hall.kind !== "building" || !worker || worker.kind !== "unit") {
+    const food = Object.values(snapshot.entities).find((entity) => entity.kind === "resource" && entity.resourceType === "food");
+    if (!hall || hall.kind !== "building" || !worker || worker.kind !== "unit" || !food || food.kind !== "resource") {
       return null;
     }
 
     const blockedPoint = window.__REDWALL_DEBUG__?.getScreenPointForEntity(hall.id) ?? null;
     const workerPoint = window.__REDWALL_DEBUG__?.getScreenPointForEntity(worker.id) ?? null;
+    const resourcePoint = window.__REDWALL_DEBUG__?.getScreenPointForEntity(food.id) ?? null;
     let freePoint = null;
 
     for (let y = hall.tile.y + 1; y < snapshot.map.height; y += 1) {
@@ -52,11 +54,12 @@ test("battlefield hover previews and armed build state stay clear", async ({ pag
       }
     }
 
-    return blockedPoint && workerPoint && freePoint
+    return blockedPoint && workerPoint && resourcePoint && freePoint
       ? {
           workerId: worker.id,
           workerPoint,
           blockedPoint,
+          resourcePoint,
           freePoint,
         }
       : null;
@@ -84,8 +87,20 @@ test("battlefield hover previews and armed build state stay clear", async ({ pag
   await expect(buildButton).toHaveAttribute("aria-pressed", "true");
 
   await canvas.hover({ position: setup.blockedPoint });
-  await page.waitForFunction(() => window.__REDWALL_DEBUG__?.getHoverPreview()?.kind === "build-invalid");
+  await page.waitForFunction(() => {
+    const hover = window.__REDWALL_DEBUG__?.getHoverPreview();
+    return hover?.kind === "build-invalid" && hover.blockedReasons?.includes("occupied") === true;
+  });
+
+  await canvas.hover({ position: setup.resourcePoint });
+  await page.waitForFunction(() => {
+    const hover = window.__REDWALL_DEBUG__?.getHoverPreview();
+    return hover?.kind === "build-invalid" && hover.blockedReasons?.includes("resource") === true;
+  });
 
   await canvas.hover({ position: setup.freePoint });
-  await page.waitForFunction(() => window.__REDWALL_DEBUG__?.getHoverPreview()?.kind === "build-valid");
+  await page.waitForFunction(() => {
+    const hover = window.__REDWALL_DEBUG__?.getHoverPreview();
+    return hover?.kind === "build-valid" && hover.detail?.includes("footprint clear") === true;
+  });
 });

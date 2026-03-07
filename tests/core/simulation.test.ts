@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { Simulation } from "../../src/core/simulation";
+import { evaluateBuildingPlacement, Simulation } from "../../src/core/simulation";
 import { stringToSeed } from "../../src/core/random";
 import { createSnapshot, validateSnapshot } from "../../src/core/save";
 import type { GameConfig } from "../../src/core/types";
@@ -65,6 +65,35 @@ describe("simulation economy and serialization", () => {
     simulation.issueCommand({ type: "train", buildingId: hallId, unitType: "worker" });
     simulation.advanceTicks(30);
     expect(simulation.getSnapshot().players.player.populationUsed).toBeGreaterThan(afterBuilding.players.player.populationUsed);
+  });
+
+  test("building placement reports blocked reasons by tile", () => {
+    const simulation = new Simulation(createConfig("placement-preview"));
+    const snapshot = simulation.getSnapshot();
+    const hall = Object.values(snapshot.entities)
+      .find((entity) => entity.kind === "building" && entity.playerId === "player" && entity.buildingType === "abbeyHall");
+    const food = Object.values(snapshot.entities)
+      .find((entity) => entity.kind === "resource" && entity.resourceType === "food");
+
+    expect(hall).toBeTruthy();
+    expect(food).toBeTruthy();
+    if (!hall || hall.kind !== "building" || !food || food.kind !== "resource") {
+      return;
+    }
+
+    const occupiedPlacement = evaluateBuildingPlacement(snapshot.map, snapshot.entities, "dormitory", hall.tile);
+    const resourcePlacement = evaluateBuildingPlacement(snapshot.map, snapshot.entities, "dormitory", food.tile);
+    const clearPlacement = evaluateBuildingPlacement(snapshot.map, snapshot.entities, "dormitory", { x: hall.tile.x + 4, y: hall.tile.y });
+
+    expect(occupiedPlacement.allowed).toBe(false);
+    expect(occupiedPlacement.blockedReasons).toContain("occupied");
+    expect(occupiedPlacement.tiles.some((tile) => tile.blocked && tile.reason === "occupied")).toBe(true);
+
+    expect(resourcePlacement.allowed).toBe(false);
+    expect(resourcePlacement.blockedReasons).toContain("resource");
+
+    expect(clearPlacement.allowed).toBe(true);
+    expect(clearPlacement.tiles.every((tile) => !tile.blocked)).toBe(true);
   });
 
   test("snapshot validation rejects version mismatches", () => {

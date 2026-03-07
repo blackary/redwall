@@ -177,26 +177,69 @@ function findNearestDropoff(world: WorldState, playerId: PlayerId, resourceType:
   return best;
 }
 
-export function canPlaceBuilding(map: MapData, entities: Record<string, Entity>, buildingType: BuildingType, tile: TilePoint): boolean {
+export type PlacementBlockReason = "out-of-bounds" | "occupied" | "resource";
+
+export type PlacementTileState = {
+  tile: TilePoint;
+  blocked: boolean;
+  reason?: PlacementBlockReason;
+};
+
+export type BuildingPlacementCheck = {
+  allowed: boolean;
+  footprint: TilePoint;
+  tiles: PlacementTileState[];
+  blockedReasons: PlacementBlockReason[];
+};
+
+export function evaluateBuildingPlacement(
+  map: MapData,
+  entities: Record<string, Entity>,
+  buildingType: BuildingType,
+  tile: TilePoint,
+): BuildingPlacementCheck {
   const definition = BUILDING_DEFINITIONS[buildingType];
   const occupancy = buildOccupancy(map, entities);
+  const resourceTiles = new Set(
+    Object.values(entities)
+      .filter((entity): entity is ResourceEntity => entity.kind === "resource")
+      .map((entity) => `${entity.tile.x},${entity.tile.y}`),
+  );
+  const tiles: PlacementTileState[] = [];
+  const blockedReasons = new Set<PlacementBlockReason>();
+
   for (let offsetX = 0; offsetX < definition.footprint.x; offsetX += 1) {
     for (let offsetY = 0; offsetY < definition.footprint.y; offsetY += 1) {
       const check = { x: tile.x + offsetX, y: tile.y + offsetY };
+      let reason: PlacementBlockReason | undefined;
       if (check.x < 0 || check.y < 0 || check.x >= map.width || check.y >= map.height) {
-        return false;
+        reason = "out-of-bounds";
+      } else if (occupancy[check.y * map.width + check.x]) {
+        reason = "occupied";
+      } else if (resourceTiles.has(`${check.x},${check.y}`)) {
+        reason = "resource";
       }
-      if (occupancy[check.y * map.width + check.x]) {
-        return false;
+      if (reason) {
+        blockedReasons.add(reason);
       }
-      for (const entity of Object.values(entities)) {
-        if (entity.kind === "resource" && entity.tile.x === check.x && entity.tile.y === check.y) {
-          return false;
-        }
-      }
+      tiles.push({
+        tile: check,
+        blocked: Boolean(reason),
+        reason,
+      });
     }
   }
-  return true;
+
+  return {
+    allowed: blockedReasons.size === 0,
+    footprint: { ...definition.footprint },
+    tiles,
+    blockedReasons: [...blockedReasons],
+  };
+}
+
+export function canPlaceBuilding(map: MapData, entities: Record<string, Entity>, buildingType: BuildingType, tile: TilePoint): boolean {
+  return evaluateBuildingPlacement(map, entities, buildingType, tile).allowed;
 }
 
 export class Simulation {

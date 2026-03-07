@@ -50,7 +50,14 @@ type DebugApi = {
   selectInScreenRect: (from: TilePoint, to: TilePoint) => void;
   getAnimationState: (id: string) => UnitAnimationState | undefined;
   getTargetIndicators: () => Array<{ id: string; tone: "attack" | "gather"; source: "issued" | "selected" }>;
-  getHoverPreview: () => { kind: string; label: string; tile: TilePoint; entityId?: string } | undefined;
+  getHoverPreview: () => {
+    kind: string;
+    label: string;
+    detail?: string;
+    tile: TilePoint;
+    entityId?: string;
+    blockedReasons?: string[];
+  } | undefined;
   getCameraState: () => { scrollX: number; scrollY: number; zoom: number } | undefined;
 };
 

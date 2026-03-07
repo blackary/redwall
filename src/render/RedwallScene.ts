@@ -2,7 +2,7 @@ import Phaser from "phaser";
 import { BUILDING_DEFINITIONS, RESEARCH_DEFINITIONS, UNIT_DEFINITIONS } from "../core/content";
 import { getFactionPalette } from "../core/factions";
 import { tileIndex } from "../core/map";
-import { canPlaceBuilding } from "../core/simulation";
+import { evaluateBuildingPlacement, type PlacementBlockReason, type PlacementTileState } from "../core/simulation";
 import type { BuildingEntity, BuildingType, Entity, PlayerId, ResourceType, TilePoint, UnitEntity, WorldState } from "../core/types";
 import { GameSession } from "../app/GameSession";
 import type { GameSettings } from "../persistence/storage";
@@ -60,8 +60,11 @@ type HoverPreviewKind =
 type HoverPreview = {
   kind: HoverPreviewKind;
   label: string;
+  detail?: string;
   tile: TilePoint;
   entityId?: string;
+  blockedReasons?: PlacementBlockReason[];
+  tiles?: PlacementTileState[];
 };
 
 function clamp(value: number, minimum: number, maximum: number): number {
@@ -114,6 +117,19 @@ function getResourceLabel(resourceType: ResourceType): string {
       return "Iron";
     default:
       return resourceType;
+  }
+}
+
+function formatPlacementReason(reason: PlacementBlockReason): string {
+  switch (reason) {
+    case "out-of-bounds":
+      return "off the map";
+    case "occupied":
+      return "another structure";
+    case "resource":
+      return "a resource node";
+    default:
+      return reason;
   }
 }
 
@@ -428,7 +444,18 @@ export class RedwallScene extends Phaser.Scene {
   }
 
   public getHoverPreview(): HoverPreview | undefined {
-    return this.hoverPreview ? { ...this.hoverPreview, tile: { ...this.hoverPreview.tile } } : undefined;
+    return this.hoverPreview
+      ? {
+          ...this.hoverPreview,
+          tile: { ...this.hoverPreview.tile },
+          blockedReasons: this.hoverPreview.blockedReasons ? [...this.hoverPreview.blockedReasons] : undefined,
+          tiles: this.hoverPreview.tiles?.map((tileState) => ({
+            tile: { ...tileState.tile },
+            blocked: tileState.blocked,
+            reason: tileState.reason,
+          })),
+        }
+      : undefined;
   }
 
   public selectInScreenRect(from: TilePoint, to: TilePoint): void {
@@ -629,16 +656,13 @@ export class RedwallScene extends Phaser.Scene {
     }
 
     if (buildMode && hoverPreview) {
-      const tile = hoverPreview.tile;
       const definition = BUILDING_DEFINITIONS[buildMode];
-      const top = this.tileToScreen(tile);
-      const width = definition.footprint.x * (this.tileWidth / 2);
-      const height = definition.footprint.y * (this.tileHeight / 2);
       const validPlacement = hoverPreview.kind === "build-valid";
-      graphics.fillStyle(validPlacement ? 0x7fb36d : 0xc2655a, 0.14);
-      graphics.fillRect(top.x - width / 2, top.y, width * 2, height * 2);
-      graphics.lineStyle(2, validPlacement ? 0x9ad27f : 0xdb7a70, 0.95);
-      graphics.strokeRect(top.x - width / 2, top.y, width * 2, height * 2);
+      const tiles = hoverPreview.tiles ?? [{
+        tile: hoverPreview.tile,
+        blocked: !validPlacement,
+      }];
+      this.drawPlacementPreview(graphics, hoverPreview.tile, definition.footprint, tiles, validPlacement);
     }
 
     if (!buildMode && commandMode && hoverPreview && !hoverPreview.entityId) {
@@ -705,11 +729,16 @@ export class RedwallScene extends Phaser.Scene {
     const worldPoint = this.getPointerWorldPoint(pointer);
     const tile = this.screenToTile(worldPoint.x, worldPoint.y);
     if (buildMode) {
-      const placeable = canPlaceBuilding(world.map, world.entities, buildMode, tile);
+      const placement = evaluateBuildingPlacement(world.map, world.entities, buildMode, tile);
       return {
-        kind: placeable ? "build-valid" : "build-invalid",
-        label: `${BUILDING_DEFINITIONS[buildMode].label}: ${placeable ? "Placeable" : "Blocked"}`,
+        kind: placement.allowed ? "build-valid" : "build-invalid",
+        label: `${BUILDING_DEFINITIONS[buildMode].label}: ${placement.allowed ? "Ready to Place" : "Placement Blocked"}`,
+        detail: placement.allowed
+          ? `${placement.footprint.x}x${placement.footprint.y} footprint clear`
+          : `Blocked by ${placement.blockedReasons.map(formatPlacementReason).join(" and ")}`,
         tile,
+        blockedReasons: placement.blockedReasons,
+        tiles: placement.tiles,
       };
     }
 
@@ -844,6 +873,60 @@ export class RedwallScene extends Phaser.Scene {
     graphics.strokeCircle(point.x, point.y + 12, Math.max(10, radius - 6));
   }
 
+  private drawPlacementPreview(
+    graphics: Phaser.GameObjects.Graphics,
+    originTile: TilePoint,
+    footprint: TilePoint,
+    tiles: PlacementTileState[],
+    validPlacement: boolean,
+  ): void {
+    for (const tileState of tiles) {
+      const point = this.tileToScreen({ x: tileState.tile.x, y: tileState.tile.y });
+      const color = tileState.blocked ? 0xdb7a70 : 0x9ad27f;
+      graphics.fillStyle(color, tileState.blocked ? 0.22 : 0.16);
+      graphics.lineStyle(2, color, 0.95);
+      graphics.beginPath();
+      graphics.moveTo(point.x, point.y);
+      graphics.lineTo(point.x + this.tileWidth / 2, point.y + this.tileHeight / 2);
+      graphics.lineTo(point.x, point.y + this.tileHeight);
+      graphics.lineTo(point.x - this.tileWidth / 2, point.y + this.tileHeight / 2);
+      graphics.closePath();
+      graphics.fillPath();
+      graphics.strokePath();
+
+      if (tileState.blocked) {
+        graphics.lineStyle(1, 0xfff1dc, 0.7);
+        graphics.strokeLineShape(new Phaser.Geom.Line(
+          point.x - this.tileWidth / 2 + 10,
+          point.y + this.tileHeight / 2,
+          point.x + this.tileWidth / 2 - 10,
+          point.y + this.tileHeight / 2,
+        ));
+        graphics.strokeLineShape(new Phaser.Geom.Line(
+          point.x,
+          point.y + 8,
+          point.x,
+          point.y + this.tileHeight - 8,
+        ));
+      }
+    }
+
+    const corners = [
+      this.tileToScreen({ x: originTile.x, y: originTile.y }),
+      this.tileToScreen({ x: originTile.x + footprint.x, y: originTile.y }),
+      this.tileToScreen({ x: originTile.x + footprint.x, y: originTile.y + footprint.y }),
+      this.tileToScreen({ x: originTile.x, y: originTile.y + footprint.y }),
+    ];
+    graphics.lineStyle(3, validPlacement ? 0xe2f0be : 0xf1c2ba, 0.92);
+    graphics.beginPath();
+    graphics.moveTo(corners[0].x, corners[0].y);
+    for (const corner of corners.slice(1)) {
+      graphics.lineTo(corner.x, corner.y);
+    }
+    graphics.closePath();
+    graphics.strokePath();
+  }
+
   private updateHoverLabel(hoverPreview: HoverPreview | undefined): void {
     const label = this.hoverLabel;
     const pointer = this.input.activePointer;
@@ -857,7 +940,7 @@ export class RedwallScene extends Phaser.Scene {
       x: canvasPoint.x / metrics.scaleX,
       y: canvasPoint.y / metrics.scaleY,
     };
-    label.setText(hoverPreview.label);
+    label.setText(hoverPreview.detail ? [hoverPreview.label, hoverPreview.detail] : hoverPreview.label);
     const color = hoverPreview.kind === "build-invalid" || hoverPreview.kind === "enemy" || hoverPreview.kind === "attack-ground"
       ? "#f7d7cf"
       : hoverPreview.kind === "resource" || hoverPreview.kind === "build-valid"
@@ -865,7 +948,7 @@ export class RedwallScene extends Phaser.Scene {
         : "#f4e8cf";
     label.setColor(color);
     const x = Math.min(this.scale.gameSize.width - label.width - 16, gamePoint.x + 18);
-    const y = Math.max(18, Math.min(this.scale.gameSize.height - 18, gamePoint.y - 18));
+    const y = Math.max(18, Math.min(this.scale.gameSize.height - label.height - 18, gamePoint.y - label.height - 10));
     label.setPosition(x, y).setVisible(true);
   }
 
