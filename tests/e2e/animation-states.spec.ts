@@ -83,6 +83,7 @@ test("workers expose live movement and harvesting animation states", async ({ pa
       && entity.order.type === "gather"
       && entity.order.phase === "harvest";
   }, workerId);
+  await page.evaluate(() => window.__REDWALL_DEBUG__?.setPaused(true));
 
   const harvestingA = await page.evaluate((id) => id ? window.__REDWALL_DEBUG__?.getAnimationState(id) : undefined, workerId);
   await page.waitForTimeout(120);

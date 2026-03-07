@@ -2,8 +2,8 @@ import { expect, type Page } from "@playwright/test";
 
 export async function waitForSession(page: Page): Promise<void> {
   await expect(page.getByTestId("game-shell")).toBeVisible();
-  await expect(page.getByTestId("hud")).toBeVisible();
   await page.waitForFunction(() => Boolean(window.__REDWALL_DEBUG__?.getSnapshot()));
+  await expect(page.locator("[data-testid='game-shell'] canvas")).toBeVisible();
 }
 
 export async function startSkirmish(page: Page): Promise<void> {

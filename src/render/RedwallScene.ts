@@ -16,6 +16,11 @@ type TargetIndicator = {
   tone: TargetHighlightTone;
   source: "issued" | "selected";
 };
+type UnitHitCandidate = {
+  unit: UnitEntity;
+  normalizedDistance: number;
+  depth: number;
+};
 type BuildingPalette = {
   wall: number;
   roof: number;
@@ -1795,10 +1800,30 @@ export class RedwallScene extends Phaser.Scene {
   }
 
   private findClosestUnitAtWorldPoint(worldX: number, worldY: number, predicate: (unit: UnitEntity) => boolean): UnitEntity | undefined {
-    let bestUnit: UnitEntity | undefined;
-    let bestDistance = Number.POSITIVE_INFINITY;
-    let bestDepth = Number.NEGATIVE_INFINITY;
+    const candidates = this.getUnitHitCandidatesAtWorldPoint(worldX, worldY, predicate);
+    if (candidates.length === 0) {
+      return undefined;
+    }
 
+    const bestDistance = Math.min(...candidates.map((candidate) => candidate.normalizedDistance));
+    const frontmostCandidates = candidates
+      .filter((candidate) => candidate.normalizedDistance <= bestDistance + 0.3)
+      .sort((left, right) => {
+        if (right.depth !== left.depth) {
+          return right.depth - left.depth;
+        }
+        return left.normalizedDistance - right.normalizedDistance;
+      });
+
+    return frontmostCandidates[0]?.unit;
+  }
+
+  private getUnitHitCandidatesAtWorldPoint(
+    worldX: number,
+    worldY: number,
+    predicate: (unit: UnitEntity) => boolean,
+  ): UnitHitCandidate[] {
+    const candidates: UnitHitCandidate[] = [];
     for (const entity of Object.values(this.session.getWorld().entities)) {
       if (entity.kind !== "unit" || !predicate(entity) || !this.isEntityVisibleToPlayer(this.session.getWorld(), entity)) {
         continue;
@@ -1810,16 +1835,15 @@ export class RedwallScene extends Phaser.Scene {
       const radiusX = entity.unitType === "ramCart" ? 30 : size * 1.55 + 10;
       const radiusY = entity.unitType === "ramCart" ? 24 : size * 2.15 + 12;
       const normalizedDistance = (((worldX - hitCenterX) ** 2) / (radiusX ** 2)) + (((worldY - hitCenterY) ** 2) / (radiusY ** 2));
-      const isCloser = normalizedDistance < bestDistance - 0.04;
-      const isFrontmostTie = Math.abs(normalizedDistance - bestDistance) <= 0.04 && point.y > bestDepth;
-      if (normalizedDistance <= 1.2 && (isCloser || isFrontmostTie)) {
-        bestUnit = entity;
-        bestDistance = normalizedDistance;
-        bestDepth = point.y;
+      if (normalizedDistance <= 1.2) {
+        candidates.push({
+          unit: entity,
+          normalizedDistance,
+          depth: point.y,
+        });
       }
     }
-
-    return bestUnit;
+    return candidates;
   }
 
   private resolveHoveredSelectionEntity(worldX: number, worldY: number, tile: TilePoint): Entity | undefined {
