@@ -119,3 +119,9 @@
 - Tests run: `npm test`; `npm run test:e2e`; `npm run build`
 - Known gaps: Clicking and menu visibility are restored on the tested layouts, but dense overlapping creature clusters still deserve a later pass for hover previews and more forgiving sprite hit affordances.
 - Commit hash: `bedcda9`
+
+## 2026-03-07 Canvas Click Accuracy and Dock Height Fix
+- Summary: Reworked screen-to-world conversion to use the actual displayed canvas bounds instead of Phaser's abstract display size so battlefield clicks line up with what the player sees, enlarged unit hit ellipses for more forgiving selection around clustered creatures and buildings, and constrained the bottom dock to a fixed viewport slice with internal scrolling so selecting a worker no longer lets the construction palette consume the whole battlefield.
+- Tests run: `npm test`; `npm run test:e2e`; `npm run build`
+- Known gaps: Click targeting now matches the visible battlefield much more closely on the tested layouts, but there is still room for future polish like hover outlines and tighter sprite-specific pick masks on dense late-game armies.
+- Commit hash: `3db3f9b`
