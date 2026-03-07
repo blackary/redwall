@@ -33,24 +33,50 @@ test("clicking a worker on the battlefield opens the command palette", async ({ 
     throw new Error("Worker point was not available for click-selection test");
   }
 
-  await page.locator("[data-testid='game-shell'] canvas").click({ position: workerPoint });
+  const canvas = page.locator("[data-testid='game-shell'] canvas");
+  await canvas.click({ position: workerPoint });
 
   await expect(page.getByTestId("selection-name")).toHaveText("Worker");
   await expect(page.getByTestId("action-mode-move")).toBeVisible();
   await expect(page.getByTestId("action-build-dormitory")).toBeVisible();
 
+  for (const offset of [
+    { x: 14, y: -10 },
+    { x: -12, y: 6 },
+  ]) {
+    await page.waitForTimeout(400);
+    await canvas.click({
+      position: {
+        x: workerPoint.x + offset.x,
+        y: workerPoint.y + offset.y,
+      },
+    });
+    await expect(page.getByTestId("selection-name")).toHaveText("Worker");
+  }
+
   const layout = await page.evaluate(() => {
-    const actionPanel = document.querySelector("[data-testid='action-panel']")?.getBoundingClientRect();
+    const actionPanel = document.querySelector(".action-panel")?.getBoundingClientRect();
+    const actionPalette = document.querySelector("[data-testid='action-panel']") as HTMLDivElement | null;
     const sidebar = document.querySelector("[data-testid='hud-sidebar']")?.getBoundingClientRect();
+    const dock = document.querySelector(".hud-dock")?.getBoundingClientRect();
     return {
       viewportHeight: window.innerHeight,
       actionPanel: actionPanel ? { top: actionPanel.top, bottom: actionPanel.bottom } : null,
       sidebar: sidebar ? { top: sidebar.top, bottom: sidebar.bottom } : null,
+      dock: dock ? { top: dock.top, bottom: dock.bottom, height: dock.height } : null,
+      actionPaletteMetrics: actionPalette ? {
+        clientHeight: actionPalette.clientHeight,
+        scrollHeight: actionPalette.scrollHeight,
+      } : null,
     };
   });
 
   expect(layout.actionPanel).toBeTruthy();
   expect(layout.sidebar).toBeTruthy();
+  expect(layout.dock).toBeTruthy();
+  expect(layout.actionPaletteMetrics).toBeTruthy();
   expect(layout.actionPanel!.bottom).toBeLessThanOrEqual(layout.viewportHeight);
   expect(layout.sidebar!.bottom).toBeLessThanOrEqual(layout.viewportHeight);
+  expect(layout.dock!.height).toBeLessThanOrEqual(380);
+  expect(layout.actionPaletteMetrics!.scrollHeight).toBeGreaterThanOrEqual(layout.actionPaletteMetrics!.clientHeight);
 });

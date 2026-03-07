@@ -38,6 +38,13 @@ type DragPoint = {
   worldY: number;
 };
 
+type CanvasMetrics = {
+  displayWidth: number;
+  displayHeight: number;
+  scaleX: number;
+  scaleY: number;
+};
+
 function clamp(value: number, minimum: number, maximum: number): number {
   return Math.min(maximum, Math.max(minimum, value));
 }
@@ -54,6 +61,26 @@ function mixColor(base: number, target: number, amount: number): number {
   const green = Math.round(baseGreen + (targetGreen - baseGreen) * ratio);
   const blue = Math.round(baseBlue + (targetBlue - baseBlue) * ratio);
   return (red << 16) | (green << 8) | blue;
+}
+
+function getUnitRenderSize(unit: UnitEntity): number {
+  const species = getUnitSpecies(unit);
+  if (species === "badger") {
+    return 16;
+  }
+  if (species === "machine") {
+    return 17;
+  }
+  if (species === "hare") {
+    return 13;
+  }
+  if (species === "otter") {
+    return 12;
+  }
+  if (species === "shrew") {
+    return 10;
+  }
+  return 11;
 }
 
 function getQueueItemTotalMs(building: BuildingEntity): number | undefined {
@@ -842,17 +869,7 @@ export class RedwallScene extends Phaser.Scene {
       x: basePoint.x + pose.sway,
       y: basePoint.y + pose.bob,
     };
-    const size = species === "badger"
-      ? 16
-      : species === "machine"
-        ? 17
-        : species === "hare"
-          ? 13
-          : species === "otter"
-            ? 12
-            : species === "shrew"
-              ? 10
-              : 11;
+    const size = getUnitRenderSize(unit);
     const hitFlash = Math.max(0, (this.hitFlashes.get(unit.id) ?? 0) - timeMs);
     const flashAmount = hitFlash > 0 ? Math.min(1, hitFlash / 160) : 0;
     if (selected) {
@@ -1426,11 +1443,16 @@ export class RedwallScene extends Phaser.Scene {
       if (entity.kind !== "unit" || !predicate(entity) || !this.isEntityVisibleToPlayer(this.session.getWorld(), entity)) {
         continue;
       }
+      const size = getUnitRenderSize(entity);
       const point = this.tileToScreen(entity.position);
-      const distance = Phaser.Math.Distance.Between(point.x, point.y + 6, worldX, worldY);
-      if (distance <= 34 && distance < bestDistance) {
+      const hitCenterX = point.x;
+      const hitCenterY = point.y + 2;
+      const radiusX = entity.unitType === "ramCart" ? 30 : size * 1.55 + 10;
+      const radiusY = entity.unitType === "ramCart" ? 24 : size * 2.15 + 12;
+      const normalizedDistance = (((worldX - hitCenterX) ** 2) / (radiusX ** 2)) + (((worldY - hitCenterY) ** 2) / (radiusY ** 2));
+      if (normalizedDistance <= 1.2 && normalizedDistance < bestDistance) {
         bestUnit = entity;
-        bestDistance = distance;
+        bestDistance = normalizedDistance;
       }
     }
 
@@ -1597,13 +1619,24 @@ export class RedwallScene extends Phaser.Scene {
     };
   }
 
+  private getCanvasMetrics(): CanvasMetrics {
+    const rect = this.game.canvas.getBoundingClientRect();
+    const displayWidth = rect.width || this.scale.displaySize.width;
+    const displayHeight = rect.height || this.scale.displaySize.height;
+    return {
+      displayWidth,
+      displayHeight,
+      scaleX: displayWidth / this.scale.gameSize.width,
+      scaleY: displayHeight / this.scale.gameSize.height,
+    };
+  }
+
   private screenToWorld(point: TilePoint): TilePoint {
     const camera = this.cameras.main;
-    const scaleX = this.scale.displaySize.width / this.scale.gameSize.width;
-    const scaleY = this.scale.displaySize.height / this.scale.gameSize.height;
+    const metrics = this.getCanvasMetrics();
     return {
-      x: point.x / scaleX / camera.zoom + camera.scrollX,
-      y: point.y / scaleY / camera.zoom + camera.scrollY,
+      x: point.x / metrics.scaleX / camera.zoom + camera.scrollX,
+      y: point.y / metrics.scaleY / camera.zoom + camera.scrollY,
     };
   }
 
@@ -1616,11 +1649,10 @@ export class RedwallScene extends Phaser.Scene {
         y: domEvent.clientY - rect.top,
       };
     }
-    const scaleX = this.scale.displaySize.width / this.scale.gameSize.width;
-    const scaleY = this.scale.displaySize.height / this.scale.gameSize.height;
+    const metrics = this.getCanvasMetrics();
     return {
-      x: pointer.x * scaleX,
-      y: pointer.y * scaleY,
+      x: pointer.x * metrics.scaleX,
+      y: pointer.y * metrics.scaleY,
     };
   }
 
@@ -1630,11 +1662,10 @@ export class RedwallScene extends Phaser.Scene {
 
   private worldToScreenPoint(world: TilePoint): TilePoint {
     const camera = this.cameras.main;
-    const scaleX = this.scale.displaySize.width / this.scale.gameSize.width;
-    const scaleY = this.scale.displaySize.height / this.scale.gameSize.height;
+    const metrics = this.getCanvasMetrics();
     return {
-      x: (world.x - camera.scrollX) * camera.zoom * scaleX,
-      y: (world.y - camera.scrollY) * camera.zoom * scaleY,
+      x: (world.x - camera.scrollX) * camera.zoom * metrics.scaleX,
+      y: (world.y - camera.scrollY) * camera.zoom * metrics.scaleY,
     };
   }
 
