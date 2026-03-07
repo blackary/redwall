@@ -311,6 +311,7 @@ export class Hud {
   private settings: GameSettings;
   private lastActionSignature = "";
   private actionFocusId?: string;
+  private lastSelectionFocusSignature = "";
 
   public constructor(session: GameSession, root: HTMLDivElement, options: HudOptions) {
     this.session = session;
@@ -497,6 +498,11 @@ export class Hud {
     this.renderOverlay(world.outcome, sessionState.paused, player.age, world.elapsedMs);
 
     const selected = this.session.getSelectedEntities();
+    const selectionFocusSignature = selected.map((entity) => entity.id).join("|") || "none";
+    if (selectionFocusSignature !== this.lastSelectionFocusSignature) {
+      this.actionFocusId = undefined;
+      this.lastSelectionFocusSignature = selectionFocusSignature;
+    }
     this.selectionCountLabel.textContent = getSelectionCountLabel(selected);
     this.selectionHost.innerHTML = "";
     this.selectionRosterHost.innerHTML = "";
@@ -771,12 +777,193 @@ export class Hud {
     });
   }
 
+  private getEntityDisplayLabel(entity: Entity): string {
+    if (entity.kind === "unit") {
+      return UNIT_DEFINITIONS[entity.unitType].label;
+    }
+    if (entity.kind === "building") {
+      return BUILDING_DEFINITIONS[entity.buildingType].label;
+    }
+    return formatResourceLabel(entity.resourceType);
+  }
+
+  private formatTileValue(tile: TilePoint): string {
+    return `${tile.x}, ${tile.y}`;
+  }
+
+  private describeUnitOrder(unit: UnitEntity): { title: string; summary: string; target: string } {
+    const world = this.session.getWorld();
+    switch (unit.order.type) {
+      case "idle":
+        return {
+          title: "Idle",
+          summary: "This unit is waiting for orders.",
+          target: "Awaiting orders",
+        };
+      case "move":
+        return {
+          title: "Moving",
+          summary: `Traveling toward ${this.formatTileValue(unit.order.destination)}.`,
+          target: this.formatTileValue(unit.order.destination),
+        };
+      case "attackMove":
+        return {
+          title: "Attack-Moving",
+          summary: `Advancing toward ${this.formatTileValue(unit.order.destination)} and engaging threats on the way.`,
+          target: this.formatTileValue(unit.order.destination),
+        };
+      case "gather": {
+        const target = world.entities[unit.order.targetId];
+        const resourceLabel = target?.kind === "resource" ? formatResourceLabel(target.resourceType) : "Resource";
+        if (unit.order.phase === "harvest") {
+          return {
+            title: `Harvesting ${resourceLabel}`,
+            summary: `Working directly on the ${resourceLabel.toLowerCase()} node.`,
+            target: resourceLabel,
+          };
+        }
+        if (unit.order.phase === "toDropoff") {
+          const carryLabel = unit.carry ? formatResourceLabel(unit.carry.type) : resourceLabel;
+          return {
+            title: `Returning ${carryLabel}`,
+            summary: `Carrying ${carryLabel.toLowerCase()} back to the nearest drop-off.`,
+            target: carryLabel,
+          };
+        }
+        return {
+          title: `Gathering ${resourceLabel}`,
+          summary: `Heading to the selected ${resourceLabel.toLowerCase()} node.`,
+          target: resourceLabel,
+        };
+      }
+      case "build": {
+        const target = world.entities[unit.order.targetId];
+        const label = target?.kind === "building" ? BUILDING_DEFINITIONS[target.buildingType].label : "Construction Site";
+        return {
+          title: "Building",
+          summary: `Constructing ${label}.`,
+          target: label,
+        };
+      }
+      case "attack": {
+        const target = world.entities[unit.order.targetId];
+        const label = target ? this.getEntityDisplayLabel(target) : "Enemy target";
+        return {
+          title: "Attacking",
+          summary: `Pressing the attack on ${label}.`,
+          target: label,
+        };
+      }
+      case "hold":
+        return {
+          title: "Holding",
+          summary: "Standing ground until a new command is issued.",
+          target: "Current position",
+        };
+      default:
+        return {
+          title: "Idle",
+          summary: "This unit is waiting for orders.",
+          target: "Awaiting orders",
+        };
+    }
+  }
+
+  private describeBuildingActivity(building: BuildingEntity): { title: string; summary: string; target: string } {
+    if (!building.completed) {
+      const totalMs = Math.max(1, BUILDING_DEFINITIONS[building.buildingType].buildTimeMs);
+      const progress = Math.round((building.buildProgressMs / totalMs) * 100);
+      return {
+        title: "Under Construction",
+        summary: `${BUILDING_DEFINITIONS[building.buildingType].label} is ${progress}% complete.`,
+        target: `${progress}% complete`,
+      };
+    }
+    if (building.queue.length > 0) {
+      const active = building.queue[0];
+      const label = getQueuedItemLabel(active);
+      const taskLabel = active.kind === "unit"
+        ? `Training ${label}`
+        : active.kind === "research"
+          ? `Researching ${label}`
+          : label;
+      return {
+        title: taskLabel,
+        summary: `${formatDuration(active.remainingMs)} remaining on the current queue item.`,
+        target: label,
+      };
+    }
+    return {
+      title: "Idle",
+      summary: `Ready for orders. Rally point is ${this.formatTileValue(building.rallyPoint)}.`,
+      target: this.formatTileValue(building.rallyPoint),
+    };
+  }
+
+  private getSelectionStatusState(selected: Entity[]): {
+    title: string;
+    summary: string;
+    rows: Array<{ label: string; value: string }>;
+    status: string;
+    kicker: string;
+  } {
+    if (selected.length !== 1) {
+      const workerCount = selected.filter((entity) => entity.kind === "unit" && UNIT_DEFINITIONS[entity.unitType].tags.includes("worker")).length;
+      const troopCount = selected.filter((entity) => entity.kind === "unit").length - workerCount;
+      return {
+        title: "Group Orders",
+        summary: workerCount > 0
+          ? "Mixed group selected. Movement and worker economy commands are available together."
+          : "Troop group selected. Use the palette or right click to move and attack as a formation.",
+        rows: [
+          { label: "Units", value: `${selected.length}` },
+          { label: "Workers", value: `${workerCount}` },
+          { label: "Troops", value: `${Math.max(0, troopCount)}` },
+        ],
+        status: "Issue a group order from the Command Palette or with right click.",
+        kicker: "Selection Status",
+      };
+    }
+
+    const entity = selected[0];
+    if (entity.kind === "unit") {
+      const order = this.describeUnitOrder(entity);
+      return {
+        title: order.title,
+        summary: order.summary,
+        rows: this.getSelectionDetailRows(selected),
+        status: "Use the Command Palette below or right click to issue a new order.",
+        kicker: "Selection Status",
+      };
+    }
+    if (entity.kind === "building") {
+      const activity = this.describeBuildingActivity(entity);
+      return {
+        title: activity.title,
+        summary: activity.summary,
+        rows: this.getSelectionDetailRows(selected),
+        status: entity.completed
+          ? "Use the Command Palette to train, research, age up, or set rally points."
+          : "Workers will keep building until the site is complete.",
+        kicker: "Selection Status",
+      };
+    }
+    return {
+      title: "Harvest Site",
+      summary: `${formatResourceLabel(entity.resourceType)} remains available here for gatherers.`,
+      rows: this.getSelectionDetailRows(selected),
+      status: "Select workers and use Gather or the direct tasking buttons to work this node.",
+      kicker: "Selection Status",
+    };
+  }
+
   private renderSelectionCard(entity: Entity): HTMLDivElement {
     const card = document.createElement("div");
     card.className = "selection-card";
 
     if (entity.kind === "unit") {
       const definition = getFactionAdjustedUnitDefinition(this.session.getWorld().players[entity.playerId].faction, UNIT_DEFINITIONS[entity.unitType]);
+      const order = this.describeUnitOrder(entity);
       const cargo = entity.carry ? `${formatLabel(entity.carry.type)} ${Math.round(entity.carry.amount)}` : "None";
       card.innerHTML = `
         <div class="selection-hero">
@@ -792,13 +979,16 @@ export class Hud {
           <div><span>Armor</span><strong>${definition.armor ?? 0}</strong></div>
           <div><span>Speed</span><strong>${definition.speed.toFixed(2)}</strong></div>
         </div>
-        <div class="selection-health">Carry: ${cargo}</div>
+        <div class="selection-health" data-testid="selection-order-summary">Task: ${order.title}</div>
+        <div class="selection-meta" data-testid="selection-order-target">Target: ${order.target}</div>
+        <div class="selection-health" data-testid="selection-carry">Carry: ${cargo}</div>
       `;
       return card;
     }
 
     if (entity.kind === "building") {
       const definition = BUILDING_DEFINITIONS[entity.buildingType];
+      const activity = this.describeBuildingActivity(entity);
       const footprint = `${definition.footprint.x}x${definition.footprint.y}`;
       const output = definition.production?.length ? `${definition.production.length} options` : "No queue";
       card.innerHTML = `
@@ -815,6 +1005,8 @@ export class Hud {
           <div><span>Range</span><strong>${definition.attackRange ? definition.attackRange.toFixed(1) : "-"}</strong></div>
           <div><span>Output</span><strong>${output}</strong></div>
         </div>
+        <div class="selection-health" data-testid="selection-building-status">Status: ${activity.title}</div>
+        <div class="selection-meta">${activity.summary}</div>
       `;
       card.append(this.renderBuildingWorkState(entity));
       return card;
@@ -999,6 +1191,7 @@ export class Hud {
     const playerFaction = getFactionDefinition(world.players.player.faction);
     const tutorialState = getTutorialState(world, selected);
     const focusedAction = this.resolveFocusedAction(actions);
+    const selectionStatus = this.getSelectionStatusState(selected);
     const sessionState = this.session.getSessionState();
     const selectedEntity = selected.length === 1 ? selected[0] : undefined;
 
@@ -1038,14 +1231,14 @@ export class Hud {
         ? `Build mode is armed for ${BUILDING_DEFINITIONS[sessionState.buildMode].label}.`
         : sessionState.commandMode
           ? `${this.getCommandLabel()} is armed.`
-          : "Hover or focus a Command Palette button to inspect it here.");
+          : selectionStatus.summary);
 
     const sidebar = document.createElement("div");
     sidebar.className = "sidebar-shell";
     sidebar.innerHTML = `
       <div class="sidebar-header">
         <div class="panel-heading">Right Sidebar</div>
-        <span class="dock-kicker">${focusedAction?.categoryLabel ?? "Selection Detail"}</span>
+        <span class="dock-kicker">${focusedAction?.categoryLabel ?? selectionStatus.kicker}</span>
       </div>
       <div class="sidebar-card">
         <div class="sidebar-label">Current Selection</div>
@@ -1054,7 +1247,7 @@ export class Hud {
       </div>
       <div class="sidebar-card">
         <div class="sidebar-label">Current Task</div>
-        <h3 data-testid="sidebar-action-title">${focusedAction?.label ?? this.getCommandLabel()}</h3>
+        <h3 data-testid="sidebar-action-title">${focusedAction?.label ?? selectionStatus.title}</h3>
         <p class="sidebar-copy" data-testid="sidebar-action-summary">${selectedActionSummary}</p>
         <div class="sidebar-meta" data-testid="sidebar-action-meta"></div>
         <p class="sidebar-status" data-testid="sidebar-status"></p>
@@ -1071,7 +1264,7 @@ export class Hud {
     const statusHost = this.sidebarHost.querySelector("[data-testid='sidebar-status']") as HTMLParagraphElement;
     const actionListHost = this.sidebarHost.querySelector("[data-testid='sidebar-action-list']") as HTMLDivElement;
 
-    const rows = focusedAction?.detailRows ?? this.getSelectionDetailRows(selected);
+    const rows = focusedAction?.detailRows ?? selectionStatus.rows;
     for (const row of rows) {
       const item = document.createElement("div");
       item.className = "sidebar-meta-row";
@@ -1087,7 +1280,7 @@ export class Hud {
           ? "Command armed: left click the battlefield to issue this order."
           : focusedAction
             ? "Ready now."
-            : "Inspect the options below to plan the next step.";
+            : selectionStatus.status;
 
     const previewActions = actions.length > 0 ? actions.slice(0, 6) : [];
     for (const action of previewActions) {
@@ -1168,9 +1361,9 @@ export class Hud {
       return undefined;
     }
     const sessionState = this.session.getSessionState();
-    const preferredId = this.actionFocusId
-      ?? (sessionState.buildMode ? `action-build-${sessionState.buildMode}` : undefined)
-      ?? (sessionState.commandMode === "move"
+    const armedId = sessionState.buildMode
+      ? `action-build-${sessionState.buildMode}`
+      : sessionState.commandMode === "move"
         ? "action-mode-move"
         : sessionState.commandMode === "gather"
           ? "action-mode-gather"
@@ -1178,19 +1371,21 @@ export class Hud {
             ? "action-mode-attack"
             : sessionState.commandMode === "rally"
               ? "action-mode-rally"
-              : undefined);
-    const explicit = preferredId ? actions.find((action) => action.testId === preferredId) : undefined;
+              : undefined;
+    const armedAction = armedId ? actions.find((action) => action.testId === armedId) : undefined;
+    if (armedAction) {
+      this.actionFocusId = armedAction.testId;
+      return armedAction;
+    }
+    if (!this.actionFocusId) {
+      return undefined;
+    }
+    const explicit = actions.find((action) => action.testId === this.actionFocusId);
     if (explicit) {
-      this.actionFocusId = explicit.testId;
       return explicit;
     }
-    const defaultAction = actions.find((action) => !action.disabled && action.tone === "build")
-      ?? actions.find((action) => !action.disabled && action.tone === "train")
-      ?? actions.find((action) => !action.disabled && action.tone === "research")
-      ?? actions.find((action) => !action.disabled)
-      ?? actions[0];
-    this.actionFocusId = defaultAction.testId;
-    return defaultAction;
+    this.actionFocusId = undefined;
+    return undefined;
   }
 
   private getSelectionDetailRows(selected: Entity[]): Array<{ label: string; value: string }> {
@@ -1199,21 +1394,21 @@ export class Hud {
     }
     const entity = selected[0];
     if (entity.kind === "unit") {
-      const definition = getFactionAdjustedUnitDefinition(this.session.getWorld().players[entity.playerId].faction, UNIT_DEFINITIONS[entity.unitType]);
+      const order = this.describeUnitOrder(entity);
       return [
+        { label: "Task", value: order.title },
+        { label: "Target", value: order.target },
+        { label: "Carry", value: entity.carry ? `${formatResourceLabel(entity.carry.type)} ${Math.round(entity.carry.amount)}` : "None" },
         { label: "HP", value: `${Math.round(entity.hp)}/${entity.maxHp}` },
-        { label: "Attack", value: `${definition.attackDamage}` },
-        { label: "Armor", value: `${definition.armor ?? 0}` },
-        { label: "Speed", value: `${definition.speed.toFixed(2)}` },
       ];
     }
     if (entity.kind === "building") {
-      const definition = BUILDING_DEFINITIONS[entity.buildingType];
+      const activity = this.describeBuildingActivity(entity);
       return [
+        { label: "Status", value: activity.title },
+        { label: "Rally", value: this.formatTileValue(entity.rallyPoint) },
         { label: "HP", value: `${Math.round(entity.hp)}/${entity.maxHp}` },
-        { label: "Size", value: formatFootprint(entity.buildingType) },
         { label: "Queue", value: `${entity.queue.length}` },
-        { label: "Age", value: formatAge(definition.age) },
       ];
     }
     return [{ label: "Remaining", value: `${entity.amount}` }];

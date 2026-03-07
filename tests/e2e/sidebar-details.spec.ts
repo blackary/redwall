@@ -29,7 +29,8 @@ test("right sidebar stays visible and explains build actions in detail", async (
 
   await expect(page.getByTestId("hud-sidebar")).toBeVisible();
   await expect(page.getByTestId("sidebar-title")).toHaveText("Worker");
-  await expect(page.getByTestId("sidebar-action-title")).toHaveText("Dormitory");
+  await expect(page.getByTestId("sidebar-action-title")).toHaveText("Holding");
+  await expect(page.getByTestId("sidebar-action-summary")).toContainText("Standing ground");
 
   await page.getByTestId("action-build-barracks").hover();
 
