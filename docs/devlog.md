@@ -179,3 +179,9 @@
 - Tests run: `npm test`; `npm run test:e2e`; `npm run build`
 - Known gaps: The tutorial now teaches the opening loop much more directly and the browser suite now covers a real match arc, but later work should still add multi-chapter instruction, campaign-style mission scripting, and more nuanced faction-specific teaching beyond the core opening.
 - Commit hash: `234444e`
+
+## 2026-03-07 Visible Click Alignment Fix
+- Summary: Replaced the old zoom-blind screen/world conversion with camera view bounds that respect Phaser's actual visible world under zoom, aligned debug screen points and drag/selection math to that same render-space projection, and added an independent Playwright regression that computes a worker's visible on-canvas position from render constants and camera state and verifies hovering and clicking that rendered body selects the exact worker.
+- Tests run: `npm test`; `npm run test:e2e`; `npm run build`
+- Known gaps: Visible clicks now land on the rendered creatures instead of several tiles northwest, but later control polish can still add tighter sprite-aware pick masks and stronger multi-unit hover silhouettes in dense late-game clumps.
+- Commit hash: `f74b1c8`
