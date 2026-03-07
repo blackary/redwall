@@ -107,3 +107,9 @@
 - Tests run: `npm test`; `npm run test:e2e`; `npm run build`
 - Known gaps: Target lock is now explicit once an order lands, but a later UX pass can still add hover previews and more precise sprite-level click affordances for dense overlapping targets.
 - Commit hash: `907fe9f`
+
+## 2026-03-07 Battlefield Click Selection and Menu Restore
+- Summary: Fixed the battlefield pointer path so live mouse clicks use the same screen-to-world conversion as the reliable drag/debug paths, let clicks pass through the HUD host to the canvas again, and added real click-based Playwright coverage to ensure selecting a worker on the battlefield actually opens the command palette and build menu.
+- Tests run: `npm test`; `npm run test:e2e`; `npm run build`
+- Known gaps: Live click selection now opens the menu correctly again, but hover previews and richer pre-click affordances are still the next control pass for dense overlapping units and build placement.
+- Commit hash: `87fcd4d`
