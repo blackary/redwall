@@ -59,7 +59,19 @@ type DebugApi = {
     entityId?: string;
     blockedReasons?: string[];
   } | undefined;
-  getCameraState: () => { scrollX: number; scrollY: number; zoom: number } | undefined;
+  getCameraState: () => {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+    scrollX: number;
+    scrollY: number;
+    zoom: number;
+    worldViewX: number;
+    worldViewY: number;
+    worldViewWidth: number;
+    worldViewHeight: number;
+  } | undefined;
 };
 
 declare global {

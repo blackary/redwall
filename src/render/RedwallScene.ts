@@ -50,6 +50,13 @@ type CanvasMetrics = {
   scaleY: number;
 };
 
+type CameraViewBounds = {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+};
+
 type HoverPreviewKind =
   | "friendly"
   | "enemy"
@@ -473,10 +480,19 @@ export class RedwallScene extends Phaser.Scene {
     if (!this.cameras?.main) {
       return undefined;
     }
+    const view = this.getCameraViewBounds();
     return {
+      x: this.cameras.main.x,
+      y: this.cameras.main.y,
+      width: this.cameras.main.width,
+      height: this.cameras.main.height,
       scrollX: this.cameras.main.scrollX,
       scrollY: this.cameras.main.scrollY,
       zoom: this.cameras.main.zoom,
+      worldViewX: view.x,
+      worldViewY: view.y,
+      worldViewWidth: view.width,
+      worldViewHeight: view.height,
     };
   }
 
@@ -493,11 +509,12 @@ export class RedwallScene extends Phaser.Scene {
     if (!camera) {
       return undefined;
     }
+    const view = this.getCameraViewBounds();
     const corners = [
-      this.screenToTile(camera.scrollX, camera.scrollY),
-      this.screenToTile(camera.scrollX + camera.width / camera.zoom, camera.scrollY),
-      this.screenToTile(camera.scrollX, camera.scrollY + camera.height / camera.zoom),
-      this.screenToTile(camera.scrollX + camera.width / camera.zoom, camera.scrollY + camera.height / camera.zoom),
+      this.screenToTile(view.x, view.y),
+      this.screenToTile(view.x + view.width, view.y),
+      this.screenToTile(view.x, view.y + view.height),
+      this.screenToTile(view.x + view.width, view.y + view.height),
     ];
     return {
       minX: Math.min(...corners.map((corner) => corner.x)),
@@ -2051,12 +2068,29 @@ export class RedwallScene extends Phaser.Scene {
     };
   }
 
+  private getCameraViewBounds(): CameraViewBounds {
+    const camera = this.cameras.main;
+    const width = camera.width / camera.zoom;
+    const height = camera.height / camera.zoom;
+    return {
+      x: camera.scrollX - (width - camera.width) / 2,
+      y: camera.scrollY - (height - camera.height) / 2,
+      width,
+      height,
+    };
+  }
+
   private screenToWorld(point: TilePoint): TilePoint {
     const camera = this.cameras.main;
     const metrics = this.getCanvasMetrics();
+    const view = this.getCameraViewBounds();
+    const gamePoint = {
+      x: point.x / metrics.scaleX,
+      y: point.y / metrics.scaleY,
+    };
     return {
-      x: point.x / metrics.scaleX / camera.zoom + camera.scrollX,
-      y: point.y / metrics.scaleY / camera.zoom + camera.scrollY,
+      x: view.x + (gamePoint.x - camera.x) / camera.zoom,
+      y: view.y + (gamePoint.y - camera.y) / camera.zoom,
     };
   }
 
@@ -2099,9 +2133,14 @@ export class RedwallScene extends Phaser.Scene {
   private worldToScreenPoint(world: TilePoint): TilePoint {
     const camera = this.cameras.main;
     const metrics = this.getCanvasMetrics();
+    const view = this.getCameraViewBounds();
+    const gamePoint = {
+      x: (world.x - view.x) * camera.zoom + camera.x,
+      y: (world.y - view.y) * camera.zoom + camera.y,
+    };
     return {
-      x: (world.x - camera.scrollX) * camera.zoom * metrics.scaleX,
-      y: (world.y - camera.scrollY) * camera.zoom * metrics.scaleY,
+      x: gamePoint.x * metrics.scaleX,
+      y: gamePoint.y * metrics.scaleY,
     };
   }
 
