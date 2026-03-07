@@ -113,3 +113,9 @@
 - Tests run: `npm test`; `npm run test:e2e`; `npm run build`
 - Known gaps: Live click selection now opens the menu correctly again, but hover previews and richer pre-click affordances are still the next control pass for dense overlapping units and build placement.
 - Commit hash: `87fcd4d`
+
+## 2026-03-07 Widescreen HUD and Native Click Path Fix
+- Summary: Fixed the real widescreen layout regression that had pushed the HUD and sidebar below the viewport by restoring the live `.hud` root to an absolute overlay and constraining the battlefield shell to viewport height, switched runtime picking to use native canvas-relative mouse coordinates instead of the broken pointer conversion, and hardened the Playwright click-selection regression to verify both the worker command palette and the right sidebar stay visible on a large display.
+- Tests run: `npm test`; `npm run test:e2e`; `npm run build`
+- Known gaps: Clicking and menu visibility are restored on the tested layouts, but dense overlapping creature clusters still deserve a later pass for hover previews and more forgiving sprite hit affordances.
+- Commit hash: `bedcda9`
