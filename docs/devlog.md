@@ -173,3 +173,9 @@
 - Tests run: `npm test`; `npm run test:e2e`; `npm run build`
 - Known gaps: The game now clearly shows different fronts, doctrines, and unit identities, but a later content pass should deepen this further with faction-specific buildings, more unique unit silhouettes per faction, and stronger tutorial callouts that teach the strategic differences.
 - Commit hash: `92877a7`
+
+## 2026-03-07 Tutorial Guidance and Match Playthrough Pass
+- Summary: Expanded the guided tutorial from a simple checklist into a seven-step teaching flow with explicit why/how/success guidance, added a worker-training and first-attack lesson so the tutorial teaches a real opening instead of only build placement, exposed that guidance in the HUD, and added a long deterministic Playwright playthrough that walks through economy, Abbey age progression, research, army production, decisive combat, and victory resolution.
+- Tests run: `npm test`; `npm run test:e2e`; `npm run build`
+- Known gaps: The tutorial now teaches the opening loop much more directly and the browser suite now covers a real match arc, but later work should still add multi-chapter instruction, campaign-style mission scripting, and more nuanced faction-specific teaching beyond the core opening.
+- Commit hash: `234444e`
