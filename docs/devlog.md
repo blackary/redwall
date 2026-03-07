@@ -155,3 +155,9 @@
 - Tests run: `npm test`; `npm run test:e2e`; `npm run build`
 - Known gaps: Group readability is stronger now, but later passes can still add formation previews, per-unit portrait art, and deeper military-control affordances like stance toggles or queueable mixed orders.
 - Commit hash: `201ca86`
+
+## 2026-03-07 Menu Scroll Restore
+- Summary: Removed the global body scroll lock from the menu flow, made document scroll mode explicit per app screen so only the in-match shell remains locked, and added a short-viewport Playwright regression that verifies the main menu page actually scrolls.
+- Tests run: `npm test`; `npm run test:e2e`; `npm run build`
+- Known gaps: Menu scrolling now works again, but later menu polish can still improve how much content is above the fold on shorter laptop screens.
+- Commit hash: `2fb6398`
