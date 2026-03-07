@@ -527,13 +527,32 @@ export class Hud {
       this.selectionHost.append(this.renderSelectionCard(selected[0]));
       this.hintHost.textContent = this.getContextHint(selected);
     } else {
+      const group = this.getGroupStatusData(selected);
       const wrapper = document.createElement("div");
       wrapper.className = "selection-summary";
       wrapper.innerHTML = `
         <div class="selection-title">${selected.length} units ready</div>
         <div class="selection-meta">Double-click to grab a whole troop type. Click a roster chip below to filter the current group.</div>
+        <div class="selection-detail-grid group-summary-grid">
+          <div><span>Workers</span><strong data-testid="group-workers">${group.workers}</strong></div>
+          <div><span>Troops</span><strong data-testid="group-troops">${group.troops}</strong></div>
+          <div><span>Primary Order</span><strong data-testid="group-primary-order">${group.primaryOrder}</strong></div>
+          <div><span>Types</span><strong data-testid="group-type-count">${group.types.length}</strong></div>
+        </div>
       `;
       this.selectionHost.append(wrapper);
+      if (group.orders.length > 0) {
+        const orderRow = document.createElement("div");
+        orderRow.className = "group-chip-row";
+        orderRow.dataset.testid = "group-order-breakdown";
+        for (const entry of group.orders.slice(0, 4)) {
+          const chip = document.createElement("div");
+          chip.className = "group-chip";
+          chip.textContent = `${entry.count} ${entry.label}`;
+          orderRow.append(chip);
+        }
+        this.selectionHost.append(orderRow);
+      }
       this.hintHost.textContent = this.getContextHint(selected);
       this.renderSelectionRoster(selected);
     }
@@ -615,7 +634,7 @@ export class Hud {
       const workerPresent = selected.some((entity) => entity.kind === "unit" && UNIT_DEFINITIONS[entity.unitType].tags.includes("worker"));
       return workerPresent
         ? "Mixed group selected. Command cards include movement plus worker construction."
-        : "Troop group selected. Use the Command Palette or right click to move, patrol, and stop.";
+        : "Troop group selected. Use the Command Palette or right click to move, attack, and stop.";
     }
     const single = selected[0];
     if (single.kind === "unit") {
@@ -908,17 +927,17 @@ export class Hud {
     kicker: string;
   } {
     if (selected.length !== 1) {
-      const workerCount = selected.filter((entity) => entity.kind === "unit" && UNIT_DEFINITIONS[entity.unitType].tags.includes("worker")).length;
-      const troopCount = selected.filter((entity) => entity.kind === "unit").length - workerCount;
+      const group = this.getGroupStatusData(selected);
       return {
-        title: "Group Orders",
-        summary: workerCount > 0
+        title: group.primaryOrder,
+        summary: group.workers > 0
           ? "Mixed group selected. Movement and worker economy commands are available together."
           : "Troop group selected. Use the palette or right click to move and attack as a formation.",
         rows: [
           { label: "Units", value: `${selected.length}` },
-          { label: "Workers", value: `${workerCount}` },
-          { label: "Troops", value: `${Math.max(0, troopCount)}` },
+          { label: "Workers", value: `${group.workers}` },
+          { label: "Troops", value: `${group.troops}` },
+          { label: "Orders", value: group.orders.slice(0, 2).map((entry) => `${entry.count} ${entry.label}`).join(" · ") || "Mixed" },
         ],
         status: "Issue a group order from the Command Palette or with right click.",
         kicker: "Selection Status",
@@ -954,6 +973,42 @@ export class Hud {
       rows: this.getSelectionDetailRows(selected),
       status: "Select workers and use Gather or the direct tasking buttons to work this node.",
       kicker: "Selection Status",
+    };
+  }
+
+  private getGroupStatusData(selected: Entity[]): {
+    workers: number;
+    troops: number;
+    orders: Array<{ label: string; count: number }>;
+    types: Array<{ label: string; count: number }>;
+    primaryOrder: string;
+  } {
+    const units = selected.filter((entity): entity is UnitEntity => entity.kind === "unit");
+    const workers = units.filter((entity) => UNIT_DEFINITIONS[entity.unitType].tags.includes("worker")).length;
+    const troops = Math.max(0, units.length - workers);
+    const orderCounts = new Map<string, number>();
+    const typeCounts = new Map<string, number>();
+
+    for (const unit of units) {
+      const orderLabel = this.describeUnitOrder(unit).title;
+      orderCounts.set(orderLabel, (orderCounts.get(orderLabel) ?? 0) + 1);
+      const typeLabel = UNIT_DEFINITIONS[unit.unitType].label;
+      typeCounts.set(typeLabel, (typeCounts.get(typeLabel) ?? 0) + 1);
+    }
+
+    const orders = [...orderCounts.entries()]
+      .map(([label, count]) => ({ label, count }))
+      .sort((left, right) => right.count - left.count || left.label.localeCompare(right.label));
+    const types = [...typeCounts.entries()]
+      .map(([label, count]) => ({ label, count }))
+      .sort((left, right) => right.count - left.count || left.label.localeCompare(right.label));
+
+    return {
+      workers,
+      troops,
+      orders,
+      types,
+      primaryOrder: orders[0] ? `${orders[0].count} ${orders[0].label}` : "Group Orders",
     };
   }
 
