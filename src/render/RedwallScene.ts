@@ -1607,8 +1607,25 @@ export class RedwallScene extends Phaser.Scene {
     };
   }
 
+  private getPointerCanvasPoint(pointer: Phaser.Input.Pointer): TilePoint {
+    const domEvent = pointer.event as MouseEvent | undefined;
+    if (domEvent) {
+      const rect = this.game.canvas.getBoundingClientRect();
+      return {
+        x: domEvent.clientX - rect.left,
+        y: domEvent.clientY - rect.top,
+      };
+    }
+    const scaleX = this.scale.displaySize.width / this.scale.gameSize.width;
+    const scaleY = this.scale.displaySize.height / this.scale.gameSize.height;
+    return {
+      x: pointer.x * scaleX,
+      y: pointer.y * scaleY,
+    };
+  }
+
   private getPointerWorldPoint(pointer: Phaser.Input.Pointer): TilePoint {
-    return this.screenToWorld({ x: pointer.x, y: pointer.y });
+    return this.screenToWorld(this.getPointerCanvasPoint(pointer));
   }
 
   private worldToScreenPoint(world: TilePoint): TilePoint {

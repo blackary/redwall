@@ -206,17 +206,21 @@ select {
 
 .game-shell {
   min-height: 100vh;
+  height: 100vh;
   padding: 8px;
+  box-sizing: border-box;
 }
 
 .battlefield-frame {
   max-width: 1700px;
   margin: 0 auto;
+  height: 100%;
 }
 
 .canvas-shell {
   position: relative;
-  min-height: calc(100vh - 16px);
+  height: calc(100vh - 16px);
+  min-height: 0;
   border-radius: 30px;
   overflow: hidden;
   border: 1px solid rgba(232, 215, 173, 0.18);
@@ -227,13 +231,20 @@ select {
 }
 
 .canvas-host {
-  min-height: calc(100vh - 16px);
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
   background: rgba(11, 21, 19, 0.92);
 }
 
 .canvas-host canvas {
   display: block;
-  width: 100%;
+  max-width: 100%;
+  max-height: 100%;
+  width: auto;
   height: auto;
 }
 
@@ -245,13 +256,14 @@ select {
 
 .hud {
   --hud-sidebar-width: 340px;
+  position: absolute;
+  inset: 0;
   height: 100%;
   display: grid;
   grid-template-columns: minmax(0, 1fr) var(--hud-sidebar-width);
   grid-template-rows: auto minmax(0, 1fr) auto;
   gap: 10px;
   padding: 10px;
-  position: relative;
   pointer-events: none;
   font-family: Georgia, "Palatino Linotype", serif;
 }
@@ -969,6 +981,7 @@ select {
   .canvas-shell,
   .canvas-host {
     min-height: 600px;
+    height: min(calc(100vh - 24px), 760px);
   }
 
   .resource-strip {

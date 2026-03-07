@@ -2,6 +2,7 @@ import { expect, test } from "@playwright/test";
 import { startSkirmish } from "./helpers";
 
 test("clicking a worker on the battlefield opens the command palette", async ({ page }) => {
+  await page.setViewportSize({ width: 2048, height: 1215 });
   await page.goto("/?e2e=1&seed=click-selection-menu");
   await startSkirmish(page);
 
@@ -32,9 +33,24 @@ test("clicking a worker on the battlefield opens the command palette", async ({ 
     throw new Error("Worker point was not available for click-selection test");
   }
 
-  await page.mouse.click(workerPoint.x, workerPoint.y);
+  await page.locator("[data-testid='game-shell'] canvas").click({ position: workerPoint });
 
   await expect(page.getByTestId("selection-name")).toHaveText("Worker");
   await expect(page.getByTestId("action-mode-move")).toBeVisible();
   await expect(page.getByTestId("action-build-dormitory")).toBeVisible();
+
+  const layout = await page.evaluate(() => {
+    const actionPanel = document.querySelector("[data-testid='action-panel']")?.getBoundingClientRect();
+    const sidebar = document.querySelector("[data-testid='hud-sidebar']")?.getBoundingClientRect();
+    return {
+      viewportHeight: window.innerHeight,
+      actionPanel: actionPanel ? { top: actionPanel.top, bottom: actionPanel.bottom } : null,
+      sidebar: sidebar ? { top: sidebar.top, bottom: sidebar.bottom } : null,
+    };
+  });
+
+  expect(layout.actionPanel).toBeTruthy();
+  expect(layout.sidebar).toBeTruthy();
+  expect(layout.actionPanel!.bottom).toBeLessThanOrEqual(layout.viewportHeight);
+  expect(layout.sidebar!.bottom).toBeLessThanOrEqual(layout.viewportHeight);
 });
