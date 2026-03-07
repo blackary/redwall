@@ -25,16 +25,27 @@ test("clicking a worker on the battlefield opens the command palette", async ({ 
         const rightDistance = Math.hypot(right.position.x - hall.tile.x, right.position.y - hall.tile.y);
         return rightDistance - leftDistance;
       })[0];
-    return worker ? window.__REDWALL_DEBUG__?.getScreenPointForEntity(worker.id) ?? null : null;
+    return worker
+      ? {
+          id: worker.id,
+          point: window.__REDWALL_DEBUG__?.getScreenPointForEntity(worker.id) ?? null,
+        }
+      : null;
   });
 
   expect(workerPoint).toBeTruthy();
-  if (!workerPoint) {
+  if (!workerPoint?.point) {
     throw new Error("Worker point was not available for click-selection test");
   }
 
   const canvas = page.locator("[data-testid='game-shell'] canvas");
-  await canvas.click({ position: workerPoint });
+  await canvas.hover({ position: workerPoint.point });
+  await page.waitForFunction((workerId) => {
+    const hover = window.__REDWALL_DEBUG__?.getHoverPreview();
+    return hover?.entityId === workerId && hover.detail?.includes("Click to select") === true;
+  }, workerPoint.id);
+
+  await canvas.click({ position: workerPoint.point });
 
   await expect(page.getByTestId("selection-name")).toHaveText("Worker");
   await expect(page.getByTestId("action-mode-move")).toBeVisible();
@@ -45,10 +56,17 @@ test("clicking a worker on the battlefield opens the command palette", async ({ 
     { x: -12, y: 6 },
   ]) {
     await page.waitForTimeout(400);
+    await canvas.hover({
+      position: {
+        x: workerPoint.point.x + offset.x,
+        y: workerPoint.point.y + offset.y,
+      },
+    });
+    await page.waitForFunction((workerId) => window.__REDWALL_DEBUG__?.getHoverPreview()?.entityId === workerId, workerPoint.id);
     await canvas.click({
       position: {
-        x: workerPoint.x + offset.x,
-        y: workerPoint.y + offset.y,
+        x: workerPoint.point.x + offset.x,
+        y: workerPoint.point.y + offset.y,
       },
     });
     await expect(page.getByTestId("selection-name")).toHaveText("Worker");

@@ -747,6 +747,7 @@ export class RedwallScene extends Phaser.Scene {
       return {
         kind: hoveredEntity.kind === "resource" ? "resource" : hoveredEntity.playerId === "player" ? "friendly" : "enemy",
         label: this.getHoverEntityLabel(hoveredEntity),
+        detail: this.getHoverEntityDetail(hoveredEntity, commandMode),
         tile: hoveredEntity.kind === "unit"
           ? { x: Math.round(hoveredEntity.position.x), y: Math.round(hoveredEntity.position.y) }
           : hoveredEntity.tile,
@@ -834,6 +835,31 @@ export class RedwallScene extends Phaser.Scene {
     return `${getResourceLabel(entity.resourceType)} Resource`;
   }
 
+  private getHoverEntityDetail(
+    entity: Entity,
+    commandMode: "move" | "gather" | "attack" | "rally" | undefined,
+  ): string | undefined {
+    if (commandMode === "attack" && (entity.kind === "unit" || entity.kind === "building") && entity.playerId === "ai") {
+      return "Click to order an attack on this target";
+    }
+    if (commandMode === "gather" && entity.kind === "resource") {
+      return `Click to gather ${getResourceLabel(entity.resourceType).toLowerCase()}`;
+    }
+    if (entity.kind === "unit" && entity.playerId === "player") {
+      return "Click to select this unit";
+    }
+    if (entity.kind === "building" && entity.playerId === "player") {
+      return "Click to open this building's orders";
+    }
+    if (entity.kind === "resource") {
+      return "Gatherers can be tasked here from the palette or by right click";
+    }
+    if ((entity.kind === "unit" || entity.kind === "building") && entity.playerId === "ai") {
+      return "Enemy target";
+    }
+    return undefined;
+  }
+
   private drawHoverEntityIndicator(graphics: Phaser.GameObjects.Graphics, entity: Entity, kind: HoverPreviewKind): void {
     const color = kind === "enemy"
       ? 0xdb7465
@@ -850,8 +876,8 @@ export class RedwallScene extends Phaser.Scene {
         this.tileToScreen({ x: entity.tile.x + footprint.x, y: entity.tile.y + footprint.y }),
         this.tileToScreen({ x: entity.tile.x, y: entity.tile.y + footprint.y }),
       ];
-      graphics.fillStyle(color, 0.05);
-      graphics.lineStyle(2, color, alpha);
+      graphics.fillStyle(color, 0.08);
+      graphics.lineStyle(3, color, alpha);
       graphics.beginPath();
       graphics.moveTo(corners[0].x, corners[0].y);
       for (const corner of corners.slice(1)) {
@@ -860,6 +886,12 @@ export class RedwallScene extends Phaser.Scene {
       graphics.closePath();
       graphics.fillPath();
       graphics.strokePath();
+      const center = this.tileToScreen({
+        x: entity.tile.x + footprint.x / 2,
+        y: entity.tile.y + footprint.y / 2,
+      });
+      graphics.lineStyle(2, color, Math.min(1, alpha + 0.08));
+      graphics.strokeCircle(center.x, center.y + 12, 16 + Math.max(footprint.x, footprint.y) * 9);
       return;
     }
 
@@ -867,10 +899,13 @@ export class RedwallScene extends Phaser.Scene {
       ? this.tileToScreen(entity.position)
       : this.tileToScreen({ x: entity.tile.x + 0.5, y: entity.tile.y + 0.5 });
     const radius = entity.kind === "unit" ? getUnitRenderSize(entity) * 1.6 + 10 : 22;
-    graphics.lineStyle(2, color, alpha);
+    graphics.fillStyle(color, 0.1);
+    graphics.fillEllipse(point.x, point.y + 12, radius * 1.9, Math.max(14, radius * 0.95));
+    graphics.lineStyle(3, color, alpha);
     graphics.strokeCircle(point.x, point.y + 12, radius);
-    graphics.lineStyle(1, color, Math.min(1, alpha + 0.12));
+    graphics.lineStyle(2, color, Math.min(1, alpha + 0.12));
     graphics.strokeCircle(point.x, point.y + 12, Math.max(10, radius - 6));
+    graphics.strokeLineShape(new Phaser.Geom.Line(point.x - 8, point.y + 12, point.x + 8, point.y + 12));
   }
 
   private drawPlacementPreview(
@@ -1591,7 +1626,8 @@ export class RedwallScene extends Phaser.Scene {
   }
 
   private handleSelection(worldX: number, worldY: number, tile: TilePoint, options?: { append?: boolean; selectAllType?: boolean }): void {
-    const clicked = this.findPlayerEntityAtPoint(worldX, worldY, tile);
+    const clicked = this.resolveHoveredSelectionEntity(worldX, worldY, tile)
+      ?? this.findPlayerEntityAtPoint(worldX, worldY, tile);
     if (!clicked) {
       if (!options?.append) {
         this.session.clearSelection();
@@ -1761,6 +1797,7 @@ export class RedwallScene extends Phaser.Scene {
   private findClosestUnitAtWorldPoint(worldX: number, worldY: number, predicate: (unit: UnitEntity) => boolean): UnitEntity | undefined {
     let bestUnit: UnitEntity | undefined;
     let bestDistance = Number.POSITIVE_INFINITY;
+    let bestDepth = Number.NEGATIVE_INFINITY;
 
     for (const entity of Object.values(this.session.getWorld().entities)) {
       if (entity.kind !== "unit" || !predicate(entity) || !this.isEntityVisibleToPlayer(this.session.getWorld(), entity)) {
@@ -1773,13 +1810,45 @@ export class RedwallScene extends Phaser.Scene {
       const radiusX = entity.unitType === "ramCart" ? 30 : size * 1.55 + 10;
       const radiusY = entity.unitType === "ramCart" ? 24 : size * 2.15 + 12;
       const normalizedDistance = (((worldX - hitCenterX) ** 2) / (radiusX ** 2)) + (((worldY - hitCenterY) ** 2) / (radiusY ** 2));
-      if (normalizedDistance <= 1.2 && normalizedDistance < bestDistance) {
+      const isCloser = normalizedDistance < bestDistance - 0.04;
+      const isFrontmostTie = Math.abs(normalizedDistance - bestDistance) <= 0.04 && point.y > bestDepth;
+      if (normalizedDistance <= 1.2 && (isCloser || isFrontmostTie)) {
         bestUnit = entity;
         bestDistance = normalizedDistance;
+        bestDepth = point.y;
       }
     }
 
     return bestUnit;
+  }
+
+  private resolveHoveredSelectionEntity(worldX: number, worldY: number, tile: TilePoint): Entity | undefined {
+    if (!this.hoverPreview?.entityId || this.hoverPreview.kind !== "friendly") {
+      return undefined;
+    }
+    const entity = this.session.getWorld().entities[this.hoverPreview.entityId];
+    if (!entity || !this.isEntityVisibleToPlayer(this.session.getWorld(), entity)) {
+      return undefined;
+    }
+    if (entity.kind === "building") {
+      const footprint = BUILDING_DEFINITIONS[entity.buildingType].footprint;
+      const insideBuilding = tile.x >= entity.tile.x
+        && tile.y >= entity.tile.y
+        && tile.x < entity.tile.x + footprint.x
+        && tile.y < entity.tile.y + footprint.y;
+      return insideBuilding ? entity : undefined;
+    }
+    if (entity.kind !== "unit") {
+      return undefined;
+    }
+    const size = getUnitRenderSize(entity);
+    const point = this.tileToScreen(entity.position);
+    const hitCenterX = point.x;
+    const hitCenterY = point.y + 2;
+    const radiusX = entity.unitType === "ramCart" ? 32 : size * 1.65 + 12;
+    const radiusY = entity.unitType === "ramCart" ? 26 : size * 2.25 + 14;
+    const normalizedDistance = (((worldX - hitCenterX) ** 2) / (radiusX ** 2)) + (((worldY - hitCenterY) ** 2) / (radiusY ** 2));
+    return normalizedDistance <= 1.25 ? entity : undefined;
   }
 
   private selectEntitiesInWorldRect(from: TilePoint, to: TilePoint): void {
