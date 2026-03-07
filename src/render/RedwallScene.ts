@@ -2,7 +2,8 @@ import Phaser from "phaser";
 import { BUILDING_DEFINITIONS, RESEARCH_DEFINITIONS, UNIT_DEFINITIONS } from "../core/content";
 import { getFactionPalette } from "../core/factions";
 import { tileIndex } from "../core/map";
-import type { BuildingEntity, BuildingType, Entity, PlayerId, TilePoint, UnitEntity, WorldState } from "../core/types";
+import { canPlaceBuilding } from "../core/simulation";
+import type { BuildingEntity, BuildingType, Entity, PlayerId, ResourceType, TilePoint, UnitEntity, WorldState } from "../core/types";
 import { GameSession } from "../app/GameSession";
 import type { GameSettings } from "../persistence/storage";
 import { getUnitAnimationState, type UnitAnimationState } from "./animation";
@@ -45,6 +46,24 @@ type CanvasMetrics = {
   scaleY: number;
 };
 
+type HoverPreviewKind =
+  | "friendly"
+  | "enemy"
+  | "resource"
+  | "move"
+  | "attack-ground"
+  | "gather-ground"
+  | "rally"
+  | "build-valid"
+  | "build-invalid";
+
+type HoverPreview = {
+  kind: HoverPreviewKind;
+  label: string;
+  tile: TilePoint;
+  entityId?: string;
+};
+
 function clamp(value: number, minimum: number, maximum: number): number {
   return Math.min(maximum, Math.max(minimum, value));
 }
@@ -81,6 +100,21 @@ function getUnitRenderSize(unit: UnitEntity): number {
     return 10;
   }
   return 11;
+}
+
+function getResourceLabel(resourceType: ResourceType): string {
+  switch (resourceType) {
+    case "food":
+      return "Food";
+    case "timber":
+      return "Wood";
+    case "stone":
+      return "Stone";
+    case "iron":
+      return "Iron";
+    default:
+      return resourceType;
+  }
 }
 
 function getQueueItemTotalMs(building: BuildingEntity): number | undefined {
@@ -210,6 +244,8 @@ export class RedwallScene extends Phaser.Scene {
   private readonly hitFlashes = new Map<string, number>();
   private readonly previousHpByEntity = new Map<string, number>();
   private readonly targetHighlights = new Map<string, { tone: TargetHighlightTone; untilMs: number }>();
+  private hoverPreview?: HoverPreview;
+  private hoverLabel?: Phaser.GameObjects.Text;
 
   public constructor(session: GameSession, settings: GameSettings) {
     super("battlefield");
@@ -225,6 +261,16 @@ export class RedwallScene extends Phaser.Scene {
     this.terrainGraphics = this.add.graphics();
     this.entityGraphics = this.add.graphics();
     this.overlayGraphics = this.add.graphics();
+    this.hoverLabel = this.add.text(0, 0, "", {
+      fontFamily: "Georgia",
+      fontSize: "16px",
+      color: "#f4e8cf",
+      backgroundColor: "#20160fd9",
+      padding: { left: 10, right: 10, top: 6, bottom: 6 },
+    })
+      .setDepth(20)
+      .setScrollFactor(0)
+      .setVisible(false);
     this.cameras.main.setBackgroundColor("#0f1715");
     this.cameras.main.setZoom(0.82);
     this.cameras.main.setScroll(-200, -120);
@@ -379,6 +425,10 @@ export class RedwallScene extends Phaser.Scene {
     const selectedIds = this.session.getSessionState().selectedIds;
     return this.collectTargetIndicators(this.session.getWorld(), selectedIds)
       .map(({ emphasis: _emphasis, ...indicator }) => indicator);
+  }
+
+  public getHoverPreview(): HoverPreview | undefined {
+    return this.hoverPreview ? { ...this.hoverPreview, tile: { ...this.hoverPreview.tile } } : undefined;
   }
 
   public selectInScreenRect(from: TilePoint, to: TilePoint): void {
@@ -564,6 +614,9 @@ export class RedwallScene extends Phaser.Scene {
     commandMode: "move" | "gather" | "attack" | "rally" | undefined,
     selectedIds: string[],
   ): void {
+    const hoverPreview = this.getHoverPreviewState(world, buildMode, commandMode);
+    this.hoverPreview = hoverPreview;
+
     if (this.dragStart && this.dragCurrent) {
       const minX = Math.min(this.dragStart.worldX, this.dragCurrent.worldX);
       const minY = Math.min(this.dragStart.worldY, this.dragCurrent.worldY);
@@ -575,24 +628,32 @@ export class RedwallScene extends Phaser.Scene {
       graphics.strokeRect(minX, minY, width, height);
     }
 
-    if (buildMode && this.input.activePointer) {
-      const worldPoint = this.getPointerWorldPoint(this.input.activePointer);
-      const tile = this.screenToTile(worldPoint.x, worldPoint.y);
+    if (buildMode && hoverPreview) {
+      const tile = hoverPreview.tile;
       const definition = BUILDING_DEFINITIONS[buildMode];
       const top = this.tileToScreen(tile);
       const width = definition.footprint.x * (this.tileWidth / 2);
       const height = definition.footprint.y * (this.tileHeight / 2);
-      graphics.lineStyle(2, 0xdab16c, 0.9);
+      const validPlacement = hoverPreview.kind === "build-valid";
+      graphics.fillStyle(validPlacement ? 0x7fb36d : 0xc2655a, 0.14);
+      graphics.fillRect(top.x - width / 2, top.y, width * 2, height * 2);
+      graphics.lineStyle(2, validPlacement ? 0x9ad27f : 0xdb7a70, 0.95);
       graphics.strokeRect(top.x - width / 2, top.y, width * 2, height * 2);
     }
 
-    if (!buildMode && commandMode && this.input.activePointer) {
-      const worldPoint = this.getPointerWorldPoint(this.input.activePointer);
-      const tile = this.screenToTile(worldPoint.x, worldPoint.y);
+    if (!buildMode && commandMode && hoverPreview && !hoverPreview.entityId) {
+      const tile = hoverPreview.tile;
       const point = this.tileToScreen({ x: tile.x + 0.5, y: tile.y + 0.5 });
       const color = commandMode === "attack" ? 0xd16a6a : commandMode === "gather" ? 0x8fb66a : 0x8fbac3;
       graphics.lineStyle(2, color, 0.9);
       graphics.strokeCircle(point.x, point.y + 12, 18);
+    }
+
+    if (hoverPreview?.entityId) {
+      const entity = world.entities[hoverPreview.entityId];
+      if (entity && this.isEntityVisibleToPlayer(world, entity)) {
+        this.drawHoverEntityIndicator(graphics, entity, hoverPreview.kind);
+      }
     }
 
     for (const ping of this.pings) {
@@ -611,6 +672,8 @@ export class RedwallScene extends Phaser.Scene {
       this.drawTargetIndicator(graphics, entity, indicator.tone, indicator.emphasis);
     }
 
+    this.updateHoverLabel(hoverPreview);
+
     if (selectedIds.length === 0) {
       return;
     }
@@ -627,6 +690,183 @@ export class RedwallScene extends Phaser.Scene {
     graphics.strokeLineShape(new Phaser.Geom.Line(buildingCenter.x, buildingCenter.y + 16, rally.x, rally.y));
     graphics.fillStyle(0x8fbac3, 1);
     graphics.fillCircle(rally.x, rally.y, 5);
+  }
+
+  private getHoverPreviewState(
+    world: WorldState,
+    buildMode: BuildingType | undefined,
+    commandMode: "move" | "gather" | "attack" | "rally" | undefined,
+  ): HoverPreview | undefined {
+    const pointer = this.input.activePointer;
+    if (!this.isPointerInsideCanvas(pointer) || this.dragStart || this.isPanning) {
+      return undefined;
+    }
+
+    const worldPoint = this.getPointerWorldPoint(pointer);
+    const tile = this.screenToTile(worldPoint.x, worldPoint.y);
+    if (buildMode) {
+      const placeable = canPlaceBuilding(world.map, world.entities, buildMode, tile);
+      return {
+        kind: placeable ? "build-valid" : "build-invalid",
+        label: `${BUILDING_DEFINITIONS[buildMode].label}: ${placeable ? "Placeable" : "Blocked"}`,
+        tile,
+      };
+    }
+
+    const hoveredEntity = this.findHoverEntityAtPoint(world, worldPoint.x, worldPoint.y, tile, commandMode);
+    if (hoveredEntity) {
+      return {
+        kind: hoveredEntity.kind === "resource" ? "resource" : hoveredEntity.playerId === "player" ? "friendly" : "enemy",
+        label: this.getHoverEntityLabel(hoveredEntity),
+        tile: hoveredEntity.kind === "unit"
+          ? { x: Math.round(hoveredEntity.position.x), y: Math.round(hoveredEntity.position.y) }
+          : hoveredEntity.tile,
+        entityId: hoveredEntity.id,
+      };
+    }
+
+    if (!commandMode) {
+      return undefined;
+    }
+
+    return {
+      kind: commandMode === "attack"
+        ? "attack-ground"
+        : commandMode === "gather"
+          ? "gather-ground"
+          : commandMode === "rally"
+            ? "rally"
+            : "move",
+      label: commandMode === "attack"
+        ? "Attack-Move Ground"
+        : commandMode === "gather"
+          ? "Select a Resource Node"
+          : commandMode === "rally"
+            ? "Set Rally Point"
+            : "Move Destination",
+      tile,
+    };
+  }
+
+  private findHoverEntityAtPoint(
+    world: WorldState,
+    worldX: number,
+    worldY: number,
+    tile: TilePoint,
+    commandMode: "move" | "gather" | "attack" | "rally" | undefined,
+  ): Entity | undefined {
+    if (commandMode === "gather") {
+      return this.findVisibleResourceAtTile(world, tile) ?? this.findPlayerEntityAtPoint(worldX, worldY, tile);
+    }
+    if (commandMode === "attack") {
+      return this.findVisibleEnemyAtPoint(world, worldX, worldY, tile);
+    }
+    if (commandMode === "move" || commandMode === "rally") {
+      return undefined;
+    }
+    return this.findPlayerEntityAtPoint(worldX, worldY, tile)
+      ?? this.findVisibleResourceAtTile(world, tile)
+      ?? this.findVisibleEnemyAtPoint(world, worldX, worldY, tile);
+  }
+
+  private findVisibleResourceAtTile(world: WorldState, tile: TilePoint): Entity | undefined {
+    return Object.values(world.entities).find((entity) => {
+      if (entity.kind !== "resource") {
+        return false;
+      }
+      return this.isEntityVisibleToPlayer(world, entity) && entity.tile.x === tile.x && entity.tile.y === tile.y;
+    });
+  }
+
+  private findVisibleEnemyAtPoint(world: WorldState, worldX: number, worldY: number, tile: TilePoint): Entity | undefined {
+    const hoveredEnemyUnit = this.findClosestUnitAtWorldPoint(worldX, worldY, (unit) => unit.playerId === "ai");
+    if (hoveredEnemyUnit) {
+      return hoveredEnemyUnit;
+    }
+    return Object.values(world.entities).find((entity) => {
+      if (entity.kind !== "building" || entity.playerId !== "ai" || !this.isEntityVisibleToPlayer(world, entity)) {
+        return false;
+      }
+      const definition = BUILDING_DEFINITIONS[entity.buildingType];
+      return tile.x >= entity.tile.x
+        && tile.y >= entity.tile.y
+        && tile.x < entity.tile.x + definition.footprint.x
+        && tile.y < entity.tile.y + definition.footprint.y;
+    });
+  }
+
+  private getHoverEntityLabel(entity: Entity): string {
+    if (entity.kind === "unit") {
+      return `${entity.playerId === "player" ? "Friendly" : "Enemy"} ${UNIT_DEFINITIONS[entity.unitType].label}`;
+    }
+    if (entity.kind === "building") {
+      return `${entity.playerId === "player" ? "Friendly" : "Enemy"} ${BUILDING_DEFINITIONS[entity.buildingType].label}`;
+    }
+    return `${getResourceLabel(entity.resourceType)} Resource`;
+  }
+
+  private drawHoverEntityIndicator(graphics: Phaser.GameObjects.Graphics, entity: Entity, kind: HoverPreviewKind): void {
+    const color = kind === "enemy"
+      ? 0xdb7465
+      : kind === "resource"
+        ? 0x95c66f
+        : 0xf2dfa8;
+    const alpha = this.settings.reducedMotion ? 0.92 : 0.62 + ((Math.sin(this.time.now / 160) + 1) * 0.5) * 0.28;
+
+    if (entity.kind === "building") {
+      const footprint = BUILDING_DEFINITIONS[entity.buildingType].footprint;
+      const corners = [
+        this.tileToScreen({ x: entity.tile.x, y: entity.tile.y }),
+        this.tileToScreen({ x: entity.tile.x + footprint.x, y: entity.tile.y }),
+        this.tileToScreen({ x: entity.tile.x + footprint.x, y: entity.tile.y + footprint.y }),
+        this.tileToScreen({ x: entity.tile.x, y: entity.tile.y + footprint.y }),
+      ];
+      graphics.fillStyle(color, 0.05);
+      graphics.lineStyle(2, color, alpha);
+      graphics.beginPath();
+      graphics.moveTo(corners[0].x, corners[0].y);
+      for (const corner of corners.slice(1)) {
+        graphics.lineTo(corner.x, corner.y);
+      }
+      graphics.closePath();
+      graphics.fillPath();
+      graphics.strokePath();
+      return;
+    }
+
+    const point = entity.kind === "unit"
+      ? this.tileToScreen(entity.position)
+      : this.tileToScreen({ x: entity.tile.x + 0.5, y: entity.tile.y + 0.5 });
+    const radius = entity.kind === "unit" ? getUnitRenderSize(entity) * 1.6 + 10 : 22;
+    graphics.lineStyle(2, color, alpha);
+    graphics.strokeCircle(point.x, point.y + 12, radius);
+    graphics.lineStyle(1, color, Math.min(1, alpha + 0.12));
+    graphics.strokeCircle(point.x, point.y + 12, Math.max(10, radius - 6));
+  }
+
+  private updateHoverLabel(hoverPreview: HoverPreview | undefined): void {
+    const label = this.hoverLabel;
+    const pointer = this.input.activePointer;
+    if (!label || !this.isPointerInsideCanvas(pointer) || !hoverPreview) {
+      label?.setVisible(false);
+      return;
+    }
+    const canvasPoint = this.getPointerCanvasPoint(pointer);
+    const metrics = this.getCanvasMetrics();
+    const gamePoint = {
+      x: canvasPoint.x / metrics.scaleX,
+      y: canvasPoint.y / metrics.scaleY,
+    };
+    label.setText(hoverPreview.label);
+    const color = hoverPreview.kind === "build-invalid" || hoverPreview.kind === "enemy" || hoverPreview.kind === "attack-ground"
+      ? "#f7d7cf"
+      : hoverPreview.kind === "resource" || hoverPreview.kind === "build-valid"
+        ? "#e5f4d6"
+        : "#f4e8cf";
+    label.setColor(color);
+    const x = Math.min(this.scale.gameSize.width - label.width - 16, gamePoint.x + 18);
+    const y = Math.max(18, Math.min(this.scale.gameSize.height - 18, gamePoint.y - 18));
+    label.setPosition(x, y).setVisible(true);
   }
 
   private drawBuilding(
@@ -1654,6 +1894,22 @@ export class RedwallScene extends Phaser.Scene {
       x: pointer.x * metrics.scaleX,
       y: pointer.y * metrics.scaleY,
     };
+  }
+
+  private isPointerInsideCanvas(pointer: Phaser.Input.Pointer | undefined): boolean {
+    if (!pointer) {
+      return false;
+    }
+    const domEvent = pointer.event as MouseEvent | undefined;
+    const rect = this.game.canvas.getBoundingClientRect();
+    if (domEvent) {
+      return domEvent.clientX >= rect.left
+        && domEvent.clientX <= rect.right
+        && domEvent.clientY >= rect.top
+        && domEvent.clientY <= rect.bottom;
+    }
+    const point = this.getPointerCanvasPoint(pointer);
+    return point.x >= 0 && point.y >= 0 && point.x <= rect.width && point.y <= rect.height;
   }
 
   private getPointerWorldPoint(pointer: Phaser.Input.Pointer): TilePoint {

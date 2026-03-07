@@ -88,10 +88,23 @@ test("economy loop progresses and latest skirmish resumes after reload", async (
       : null;
   });
   expect(beforeReload).toBeTruthy();
+  if (!beforeReload) {
+    throw new Error("Expected a snapshot before reload");
+  }
 
   await page.reload();
   await expect(page.getByTestId("continue-skirmish")).toBeEnabled();
   await continueSkirmish(page);
+
+  await page.waitForFunction((expected) => {
+    const snapshot = window.__REDWALL_DEBUG__?.getSnapshot();
+    if (!snapshot) {
+      return false;
+    }
+    return snapshot.players.player.age === expected.age
+      && snapshot.players.player.populationCap === expected.populationCap
+      && snapshot.players.player.resources.food === expected.food;
+  }, beforeReload);
 
   const afterReload = await page.evaluate(() => {
     const snapshot = window.__REDWALL_DEBUG__?.getSnapshot();

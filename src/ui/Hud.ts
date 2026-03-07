@@ -533,7 +533,7 @@ export class Hud {
     }
 
     const actions = this.getAvailableActions(selected);
-    const actionSignature = this.getActionSignature(selected, player, actions);
+    const actionSignature = this.getActionSignature(selected, player, actions, sessionState);
     this.renderActionsPanel(actionSignature, actions);
     this.renderQueuePanel(selected);
     this.renderSidebar(selected, actions);
@@ -668,7 +668,12 @@ export class Hud {
     this.lastActionSignature = signature;
   }
 
-  private getActionSignature(selected: Entity[], player: ReturnType<GameSession["getWorld"]>["players"]["player"], actions: ActionDescriptor[]): string {
+  private getActionSignature(
+    selected: Entity[],
+    player: ReturnType<GameSession["getWorld"]>["players"]["player"],
+    actions: ActionDescriptor[],
+    sessionState: ReturnType<GameSession["getSessionState"]>,
+  ): string {
     const selectionSignature = selected.map((entity) => {
       if (entity.kind === "unit") {
         return `u:${entity.id}:${entity.unitType}`;
@@ -691,6 +696,8 @@ export class Hud {
       Math.floor(player.resources.stone),
       Math.floor(player.resources.iron),
       `${player.populationUsed}/${player.populationCap}`,
+      sessionState.buildMode ?? "no-build-mode",
+      sessionState.commandMode ?? "no-command-mode",
       researched,
     ].join("|");
   }
@@ -1578,11 +1585,34 @@ export class Hud {
     });
   }
 
+  private isActionArmed(action: ActionDescriptor): boolean {
+    const sessionState = this.session.getSessionState();
+    if (sessionState.buildMode) {
+      return action.testId === `action-build-${sessionState.buildMode}`;
+    }
+    if (!sessionState.commandMode) {
+      return false;
+    }
+    switch (sessionState.commandMode) {
+      case "move":
+        return action.testId === "action-mode-move" || action.testId === "action-group-move";
+      case "gather":
+        return action.testId === "action-mode-gather" || action.testId === "action-group-gather";
+      case "attack":
+        return action.testId === "action-mode-attack" || action.testId === "action-group-attack";
+      case "rally":
+        return action.testId === "action-mode-rally";
+      default:
+        return false;
+    }
+  }
+
   private createActionButton(action: ActionDescriptor): HTMLButtonElement {
     const button = document.createElement("button");
-	    button.className = `action-button${action.tone ? ` action-${action.tone}` : ""}`;
+    button.className = `action-button${action.tone ? ` action-${action.tone}` : ""}${this.isActionArmed(action) ? " is-active" : ""}`;
     button.dataset.testid = action.testId;
     button.disabled = Boolean(action.disabled);
+    button.setAttribute("aria-pressed", this.isActionArmed(action) ? "true" : "false");
     if (action.disabledReason) {
       button.title = action.disabledReason;
     }

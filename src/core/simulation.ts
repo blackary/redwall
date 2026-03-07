@@ -177,7 +177,7 @@ function findNearestDropoff(world: WorldState, playerId: PlayerId, resourceType:
   return best;
 }
 
-function canPlaceBuilding(map: MapData, entities: Record<string, Entity>, buildingType: BuildingType, tile: TilePoint): boolean {
+export function canPlaceBuilding(map: MapData, entities: Record<string, Entity>, buildingType: BuildingType, tile: TilePoint): boolean {
   const definition = BUILDING_DEFINITIONS[buildingType];
   const occupancy = buildOccupancy(map, entities);
   for (let offsetX = 0; offsetX < definition.footprint.x; offsetX += 1) {

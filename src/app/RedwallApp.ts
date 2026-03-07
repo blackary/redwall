@@ -50,6 +50,7 @@ type DebugApi = {
   selectInScreenRect: (from: TilePoint, to: TilePoint) => void;
   getAnimationState: (id: string) => UnitAnimationState | undefined;
   getTargetIndicators: () => Array<{ id: string; tone: "attack" | "gather"; source: "issued" | "selected" }>;
+  getHoverPreview: () => { kind: string; label: string; tile: TilePoint; entityId?: string } | undefined;
   getCameraState: () => { scrollX: number; scrollY: number; zoom: number } | undefined;
 };
 
@@ -141,6 +142,7 @@ export class RedwallApp {
       },
       getAnimationState: (id: string) => this.scene?.getAnimationState(id),
       getTargetIndicators: () => this.scene?.getTargetIndicators() ?? [],
+      getHoverPreview: () => this.scene?.getHoverPreview(),
       getCameraState: () => this.scene?.getCameraState(),
     };
   }
