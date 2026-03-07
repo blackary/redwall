@@ -143,3 +143,9 @@
 - Tests run: `npm test`; `npm run test:e2e`; `npm run build`
 - Known gaps: Hover and click targeting are now aligned much more closely, but a later polish pass can still add faction-specific portraits/icons and richer multi-unit formation selection feedback.
 - Commit hash: `0009203`
+
+## 2026-03-07 Live Selection Order HUD Pass
+- Summary: Stopped the right sidebar from defaulting to the first command card, made it fall back to the selected unit or building's actual current state instead, added live task/target readouts to the selection card, surfaced building activity and rally state more explicitly, and added browser coverage for worker task visibility directly in the HUD.
+- Tests run: `npm test`; `npm run test:e2e`; `npm run build`
+- Known gaps: Selection status is now much clearer, but later UX work can still add richer group-order summaries, portrait art, and deeper formation-level feedback for larger armies.
+- Commit hash: `3ec289b`
