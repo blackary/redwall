@@ -131,3 +131,9 @@
 - Tests run: `npm test`; `npm run test:e2e`; `npm run build`
 - Known gaps: The battlefield now previews intent before clicks land, but later control polish can still add richer hover art, sprite-level occlusion hints, and more explicit invalid-target messaging for edge cases like blocked rally points.
 - Commit hash: `546d017`
+
+## 2026-03-07 Detailed Build Placement Preview Pass
+- Summary: Promoted building placement checks into a shared evaluator that reports per-tile blocked reasons, upgraded build ghosts from a single rectangle into tile-by-tile isometric footprint previews with valid/blocked coloring, and extended hover messaging plus browser coverage so blocked placement explains whether the problem is another structure, a resource node, or map bounds.
+- Tests run: `npm test`; `npm run test:e2e`; `npm run build`
+- Known gaps: Build placement feedback is now much clearer, but dense creature overlap can still benefit from stronger hover silhouettes and more explicit pre-click target emphasis in a future control pass.
+- Commit hash: `4fef1ab`
