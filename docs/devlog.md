@@ -167,3 +167,9 @@
 - Tests run: `npm test`; `npm run test:e2e`; `npm run build`
 - Known gaps: Dense unit clicks now prefer the frontmost visible creature much more reliably, but a later polish pass can still add sprite-aware pick masks and formation-level selection affordances for even tighter battlefield control.
 - Commit hash: `6940a13`
+
+## 2026-03-07 Map, Faction, and Weapon Identity Pass
+- Summary: Surfaced map personality and faction doctrine directly in the menu and match HUD, added faction-specific unit labels, descriptions, species, and weapon names across the content layer, renderer, sidebar, and queue/work-state panels, and added unit plus Playwright coverage proving different maps, characters, and weapons actually appear in the playable product instead of only existing in static data.
+- Tests run: `npm test`; `npm run test:e2e`; `npm run build`
+- Known gaps: The game now clearly shows different fronts, doctrines, and unit identities, but a later content pass should deepen this further with faction-specific buildings, more unique unit silhouettes per faction, and stronger tutorial callouts that teach the strategic differences.
+- Commit hash: `92877a7`
