@@ -23,7 +23,8 @@ test("selection card shows live worker orders after direct tasking", async ({ pa
     }
   }, workerId);
 
-  await expect(page.getByTestId("selection-name")).toHaveText("Worker");
+  await expect(page.getByTestId("selection-name")).toContainText("Worker");
+  await expect(page.getByTestId("selection-weapon")).toContainText("Mallet");
   await expect(page.getByTestId("selection-order-summary")).toHaveText("Task: Holding");
   await expect(page.getByTestId("selection-order-target")).toContainText("Current position");
 

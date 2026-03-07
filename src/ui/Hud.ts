@@ -8,6 +8,7 @@ import type {
   BuildingEntity,
   BuildingType,
   Entity,
+  FactionId,
   ResearchId,
   ResourceBag,
   ResourceType,
@@ -125,9 +126,10 @@ function isAgeUnlocked(currentAge: Age, requiredAge: Age): boolean {
   return AGE_ORDER.indexOf(currentAge) >= AGE_ORDER.indexOf(requiredAge);
 }
 
-function getQueuedItemLabel(item: BuildingEntity["queue"][number]): string {
+function getQueuedItemLabel(item: BuildingEntity["queue"][number], factionId?: FactionId): string {
   if (item.kind === "unit") {
-    return UNIT_DEFINITIONS[item.id as UnitType].label;
+    const definition = UNIT_DEFINITIONS[item.id as UnitType];
+    return factionId ? getFactionAdjustedUnitDefinition(factionId, definition).label : definition.label;
   }
   if (item.kind === "research") {
     return RESEARCH_DEFINITIONS[item.id as ResearchId].label;
@@ -207,33 +209,6 @@ function getPlayerQueuedUnits(session: GameSession): number {
     .reduce((total, entity) => total + entity.queue.filter((item) => item.kind === "unit").length, 0);
 }
 
-function getUnitDescription(unitType: UnitType): string {
-  switch (unitType) {
-    case "worker":
-      return "Economic unit for gathering, hauling, and constructing the Abbey frontier.";
-    case "shrewScout":
-      return "Fast scouting beast with wide sight and quick response around the map.";
-    case "militia":
-      return "Basic melee line-holder for the first fights around your economy.";
-    case "shieldbearer":
-      return "Durable infantry that absorbs punishment and anchors the front line.";
-    case "slinger":
-      return "Low-cost ranged support for early volleys and skirmishes.";
-    case "archer":
-      return "Longer-range ranged unit for focused pressure and defense.";
-    case "otterSkirmisher":
-      return "Mobile warhost ranged unit with a stronger combat profile than early archers.";
-    case "hareRunner":
-      return "Fast striking infantry for raids, flanks, and quick reinforcement.";
-    case "badgerChampion":
-      return "Heavy elite bruiser meant to smash through late-game positions.";
-    case "ramCart":
-      return "Siege engine for bringing down towers, halls, and fortified lines.";
-    default:
-      return "Abbey alliance troop.";
-  }
-}
-
 function getBuildingDescription(buildingType: BuildingType): string {
   switch (buildingType) {
     case "dormitory":
@@ -300,6 +275,8 @@ export class Hud {
   private readonly outcomeLabel: HTMLParagraphElement;
   private readonly mapLabel: HTMLDivElement;
   private readonly factionLabel: HTMLSpanElement;
+  private readonly mapSummaryLabel: HTMLParagraphElement;
+  private readonly factionDoctrineLabel: HTMLParagraphElement;
   private readonly pauseButton: HTMLButtonElement;
   private readonly gridButton: HTMLButtonElement;
   private readonly motionButton: HTMLButtonElement;
@@ -361,6 +338,8 @@ export class Hud {
             <span class="dock-kicker" data-testid="faction-label">Abbey Alliance</span>
           </div>
           <canvas data-testid="minimap" width="180" height="180"></canvas>
+          <p class="hint" data-testid="map-summary">Open grassy lanes with balanced resource lines.</p>
+          <p class="hint" data-testid="faction-doctrine">Balanced woodland defenders with steady growth.</p>
           <p class="minimap-instructions">Left click the minimap to shift the camera. Double-click units to grab the full group.</p>
           <p class="hint" data-testid="outcome-label">Hold the field. Destroy the enemy host.</p>
         </div>
@@ -403,6 +382,8 @@ export class Hud {
     this.outcomeLabel = this.root.querySelector("[data-testid='outcome-label']") as HTMLParagraphElement;
     this.mapLabel = this.root.querySelector("[data-testid='map-label']") as HTMLDivElement;
     this.factionLabel = this.root.querySelector("[data-testid='faction-label']") as HTMLSpanElement;
+    this.mapSummaryLabel = this.root.querySelector("[data-testid='map-summary']") as HTMLParagraphElement;
+    this.factionDoctrineLabel = this.root.querySelector("[data-testid='faction-doctrine']") as HTMLParagraphElement;
     this.resourceValues = {
       food: this.root.querySelector("[data-testid='food-value']") as HTMLSpanElement,
       timber: this.root.querySelector("[data-testid='timber-value']") as HTMLSpanElement,
@@ -473,8 +454,11 @@ export class Hud {
     this.economySummaryLabel.textContent = this.getEconomySummary();
     this.commandLabel.textContent = this.getCommandLabel();
     this.mapLabel.textContent = getMapDefinition(world.map.preset).label;
+    const mapDefinition = getMapDefinition(world.map.preset);
     this.factionLabel.textContent = world.scenario === "tutorial" ? `${faction.label} Tutorial` : faction.label;
     this.factionLabel.style.color = toCssHex(getFactionPalette(player.faction, "player").main);
+    this.mapSummaryLabel.textContent = `${mapDefinition.terrainSummary} ${mapDefinition.resourceSummary}`;
+    this.factionDoctrineLabel.textContent = faction.doctrine;
     this.outcomeLabel.textContent =
       world.scenario === "tutorial"
         ? tutorialState?.completed
@@ -483,7 +467,7 @@ export class Hud {
             ? `Tutorial: ${tutorialState.currentStep.label}.`
             : "Follow the guided opening."
         : world.outcome === "playerVictory"
-          ? `Victory on ${getMapDefinition(world.map.preset).label}.`
+          ? `Victory on ${mapDefinition.label}.`
           : world.outcome === "playerDefeat"
             ? `The ${faction.label} host has fallen.`
             : "Hold the field. Destroy the enemy host.";
@@ -511,10 +495,10 @@ export class Hud {
       this.selectionHost.innerHTML = `
         <div class="selection-empty">
             <div class="selection-title">${faction.label} Command</div>
-            <p class="hint">${
+          <p class="hint">${
             world.scenario === "tutorial"
               ? "Follow the objective list in the right sidebar to learn the core opening sequence."
-              : `${faction.shortBonus} Use the Command Palette below to issue orders, assign worker jobs, and open construction and production groups.`
+              : `${faction.shortBonus} ${faction.doctrine} ${mapDefinition.strategicNote}`
           }</p>
         </div>
       `;
@@ -798,7 +782,7 @@ export class Hud {
 
   private getEntityDisplayLabel(entity: Entity): string {
     if (entity.kind === "unit") {
-      return UNIT_DEFINITIONS[entity.unitType].label;
+      return getFactionAdjustedUnitDefinition(this.session.getWorld().players[entity.playerId].faction, UNIT_DEFINITIONS[entity.unitType]).label;
     }
     if (entity.kind === "building") {
       return BUILDING_DEFINITIONS[entity.buildingType].label;
@@ -900,7 +884,7 @@ export class Hud {
     }
     if (building.queue.length > 0) {
       const active = building.queue[0];
-      const label = getQueuedItemLabel(active);
+      const label = getQueuedItemLabel(active, this.session.getWorld().players[building.playerId].faction);
       const taskLabel = active.kind === "unit"
         ? `Training ${label}`
         : active.kind === "research"
@@ -992,7 +976,7 @@ export class Hud {
     for (const unit of units) {
       const orderLabel = this.describeUnitOrder(unit).title;
       orderCounts.set(orderLabel, (orderCounts.get(orderLabel) ?? 0) + 1);
-      const typeLabel = UNIT_DEFINITIONS[unit.unitType].label;
+      const typeLabel = getFactionAdjustedUnitDefinition(this.session.getWorld().players[unit.playerId].faction, UNIT_DEFINITIONS[unit.unitType]).label;
       typeCounts.set(typeLabel, (typeCounts.get(typeLabel) ?? 0) + 1);
     }
 
@@ -1032,8 +1016,10 @@ export class Hud {
           <div><span>HP</span><strong>${Math.round(entity.hp)}/${entity.maxHp}</strong></div>
           <div><span>Attack</span><strong>${definition.attackDamage}</strong></div>
           <div><span>Armor</span><strong>${definition.armor ?? 0}</strong></div>
-          <div><span>Speed</span><strong>${definition.speed.toFixed(2)}</strong></div>
+          <div><span>Range</span><strong>${definition.attackRange.toFixed(1)}</strong></div>
         </div>
+        <div class="selection-meta" data-testid="selection-weapon">Weapon: ${definition.weaponLabel}</div>
+        <div class="selection-meta">${definition.description}</div>
         <div class="selection-health" data-testid="selection-order-summary">Task: ${order.title}</div>
         <div class="selection-meta" data-testid="selection-order-target">Target: ${order.target}</div>
         <div class="selection-health" data-testid="selection-carry">Carry: ${cargo}</div>
@@ -1085,7 +1071,7 @@ export class Hud {
     for (const entity of selected) {
       const key = entity.kind === "unit" ? `unit:${entity.unitType}` : entity.kind === "building" ? `building:${entity.buildingType}` : `resource:${entity.resourceType}`;
       const label = entity.kind === "unit"
-        ? UNIT_DEFINITIONS[entity.unitType].label
+        ? getFactionAdjustedUnitDefinition(this.session.getWorld().players[entity.playerId].faction, UNIT_DEFINITIONS[entity.unitType]).label
         : entity.kind === "building"
           ? BUILDING_DEFINITIONS[entity.buildingType].label
           : formatLabel(entity.resourceType);
@@ -1136,17 +1122,18 @@ export class Hud {
       : active.kind === "research"
         ? "Researching"
         : "Advancing";
+    const factionId = this.session.getWorld().players[building.playerId].faction;
 
     panel.append(
       this.createProgressBlock(
-        `${statusLabel}: ${getQueuedItemLabel(active)}`,
+        `${statusLabel}: ${getQueuedItemLabel(active, factionId)}`,
         `${Math.round(progress * 100)}%`,
         progress,
         `${formatDuration(active.remainingMs)} remaining`,
       ),
     );
 
-    const queuedItems = building.queue.slice(1).map((item) => getQueuedItemLabel(item));
+    const queuedItems = building.queue.slice(1).map((item) => getQueuedItemLabel(item, factionId));
     const queueSummary = document.createElement("p");
     queueSummary.className = "hint";
     queueSummary.dataset.testid = "work-queue";
@@ -1228,7 +1215,7 @@ export class Hud {
       const totalMs = Math.max(1, getQueuedItemTotalMs(item));
       const progress = Math.min(1, Math.max(0, (totalMs - item.remainingMs) / totalMs));
       entry.innerHTML = `
-        <div class="queue-entry-title">${index === 0 ? "Active" : `Queued ${index}`}: ${getQueuedItemLabel(item)}</div>
+        <div class="queue-entry-title">${index === 0 ? "Active" : `Queued ${index}`}: ${getQueuedItemLabel(item, this.session.getWorld().players[building.playerId].faction)}</div>
         <div class="queue-entry-meta">${item.kind === "research" ? "Research" : item.kind === "age" ? "Age Up" : "Training"} · ${formatDuration(item.remainingMs)} remaining</div>
       `;
       if (index === 0) {
@@ -1274,7 +1261,7 @@ export class Hud {
     const selectionTitle = selected.length > 1
       ? `${selected.length} Units Selected`
       : selectedEntity?.kind === "unit"
-        ? UNIT_DEFINITIONS[selectedEntity.unitType].label
+        ? this.getEntityDisplayLabel(selectedEntity)
         : selectedEntity?.kind === "building"
           ? BUILDING_DEFINITIONS[selectedEntity.buildingType].label
           : selectedEntity
@@ -1738,12 +1725,13 @@ export class Hud {
             : undefined,
       tone: "train",
       categoryLabel: "Training",
-      description: getUnitDescription(unitType),
+      description: definition.description,
       detailRows: [
         { label: "Cost", value: formatCost(definition.cost) || "Free" },
         { label: "Train", value: formatDuration(definition.trainTimeMs) },
         { label: "HP", value: `${definition.hp}` },
         { label: "Attack", value: `${definition.attackDamage}` },
+        { label: "Weapon", value: definition.weaponLabel },
       ],
     };
   }
@@ -1932,6 +1920,7 @@ export class Hud {
 
   private drawMinimap(): void {
     const world = this.session.getWorld();
+    const mapDefinition = getMapDefinition(world.map.preset);
     const context = this.minimapCanvas.getContext("2d");
     if (!context) {
       return;
@@ -1944,7 +1933,11 @@ export class Hud {
         const index = tileIndex(world.map, { x, y });
         const explored = world.players.player.explored[index];
         const visible = world.players.player.visible[index];
-        context.fillStyle = !explored ? "#08100f" : visible ? "#4c7750" : "#23372c";
+        context.fillStyle = !explored
+          ? "#08100f"
+          : visible
+            ? mapDefinition.terrainPalette.minimapVisible
+            : mapDefinition.terrainPalette.minimapExplored;
         context.fillRect(x * tileWidth, y * tileHeight, tileWidth, tileHeight);
       }
     }

@@ -42,7 +42,7 @@ test("camera, selection, and move commands work", async ({ page }) => {
   const canvasBox = await page.locator("[data-testid='game-shell'] canvas").boundingBox();
   expect(canvasBox).toBeTruthy();
   await page.evaluate((id) => window.__REDWALL_DEBUG__?.setSelection(id ? [id] : []), workerId);
-  await expect(page.getByTestId("selection-name")).toHaveText("Worker");
+  await expect(page.getByTestId("selection-name")).toContainText("Worker");
 
   const destination = { x: 8, y: 8 };
   const destinationPoint = await page.evaluate((tile) => window.__REDWALL_DEBUG__?.getScreenPointForTile(tile), destination);

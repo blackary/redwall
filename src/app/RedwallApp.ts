@@ -235,8 +235,11 @@ export class RedwallApp {
                 <div><dt>Faction</dt><dd data-testid="selected-faction">${selectedFaction.label}</dd></div>
                 <div><dt>Map</dt><dd data-testid="selected-map">${selectedMap.label}</dd></div>
                 <div><dt>Bonus</dt><dd data-testid="selected-bonus">${selectedFaction.shortBonus}</dd></div>
+                <div><dt>Doctrine</dt><dd data-testid="selected-doctrine">${selectedFaction.doctrine}</dd></div>
                 <div><dt>Seed</dt><dd data-testid="seed-value">${seedValue}</dd></div>
               </dl>
+              <p class="small-copy" data-testid="selected-map-summary">${selectedMap.description}</p>
+              <p class="small-copy" data-testid="selected-map-strategic-note">${selectedMap.strategicNote}</p>
               <p class="small-copy" data-testid="resume-status">${
                 this.resumeMeta
                   ? `Resume available from ${new Date(this.resumeMeta.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })} on ${resumeMapLabel ?? "saved battlefield"}.`

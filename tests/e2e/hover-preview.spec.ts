@@ -79,7 +79,7 @@ test("battlefield hover previews and armed build state stay clear", async ({ pag
   }, setup.workerId);
 
   await canvas.click({ position: setup.workerPoint });
-  await expect(page.getByTestId("selection-name")).toHaveText("Worker");
+  await expect(page.getByTestId("selection-name")).toContainText("Worker");
 
   const buildButton = page.getByTestId("action-build-dormitory");
   await buildButton.click();

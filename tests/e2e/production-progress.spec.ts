@@ -53,8 +53,8 @@ test("selected production buildings show current work and queued items", async (
   }, barracksId);
   await page.evaluate(() => window.__REDWALL_DEBUG__?.advanceTicks(8));
 
-  await expect(page.getByTestId("work-label")).toHaveText("Training: Militia");
-  await expect(page.getByTestId("work-queue")).toContainText("Queued next: Militia");
+  await expect(page.getByTestId("work-label")).toContainText("Militia");
+  await expect(page.getByTestId("work-queue")).toContainText("Militia");
   const progressValue = await page.getByTestId("work-progress-value").textContent();
   expect(progressValue).not.toBe("0%");
 });

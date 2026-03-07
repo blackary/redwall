@@ -11,6 +11,7 @@ export type Difficulty = "easy" | "normal" | "hard";
 export type MapPreset = (typeof MAP_PRESETS)[number];
 export type ScenarioId = (typeof SCENARIO_IDS)[number];
 export type FactionId = "abbeyAlliance" | "riverfolkCollective" | "mountainClans" | "verminRaiders";
+export type UnitSpecies = "mouse" | "shrew" | "otter" | "hare" | "badger" | "machine";
 
 export type UnitType =
   | "worker"
@@ -86,6 +87,8 @@ export interface TechTreeNode {
 export interface UnitDefinition {
   id: UnitType;
   label: string;
+  description: string;
+  weaponLabel: string;
   producedAt: BuildingType;
   age: Age;
   cost: Partial<ResourceBag>;
@@ -99,6 +102,7 @@ export interface UnitDefinition {
   gatherRate?: Partial<Record<ResourceType, number>>;
   carryCapacity?: number;
   armor?: number;
+  species?: UnitSpecies;
   tags: Array<"worker" | "infantry" | "ranged" | "siege" | "scout" | "heroic">;
 }
 

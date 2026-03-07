@@ -1,9 +1,9 @@
 import Phaser from "phaser";
 import { BUILDING_DEFINITIONS, RESEARCH_DEFINITIONS, UNIT_DEFINITIONS } from "../core/content";
-import { getFactionPalette } from "../core/factions";
-import { tileIndex } from "../core/map";
+import { getFactionAdjustedUnitDefinition, getFactionPalette } from "../core/factions";
+import { getMapDefinition, tileIndex } from "../core/map";
 import { evaluateBuildingPlacement, type PlacementBlockReason, type PlacementTileState } from "../core/simulation";
-import type { BuildingEntity, BuildingType, Entity, PlayerId, ResourceType, TilePoint, UnitEntity, WorldState } from "../core/types";
+import type { BuildingEntity, BuildingType, Entity, PlayerId, ResourceType, TilePoint, UnitEntity, UnitSpecies, WorldState } from "../core/types";
 import { GameSession } from "../app/GameSession";
 import type { GameSettings } from "../persistence/storage";
 import { getUnitAnimationState, type UnitAnimationState } from "./animation";
@@ -36,7 +36,6 @@ type UnitPalette = {
   metal: number;
   shadow: number;
 };
-type UnitSpecies = "mouse" | "shrew" | "otter" | "hare" | "badger" | "machine";
 type DragPoint = {
   screenX: number;
   screenY: number;
@@ -90,8 +89,16 @@ function mixColor(base: number, target: number, amount: number): number {
   return (red << 16) | (green << 8) | blue;
 }
 
-function getUnitRenderSize(unit: UnitEntity): number {
-  const species = getUnitSpecies(unit);
+function getRenderedUnitDefinition(unit: UnitEntity, world: WorldState) {
+  return getFactionAdjustedUnitDefinition(world.players[unit.playerId].faction, UNIT_DEFINITIONS[unit.unitType]);
+}
+
+function getUnitSpecies(unit: UnitEntity, world: WorldState): UnitSpecies {
+  return getRenderedUnitDefinition(unit, world).species ?? "mouse";
+}
+
+function getUnitRenderSize(unit: UnitEntity, world: WorldState): number {
+  const species = getUnitSpecies(unit, world);
   if (species === "badger") {
     return 16;
   }
@@ -193,24 +200,8 @@ function getBuildingPalette(building: BuildingEntity, world: WorldState): Buildi
   }
 }
 
-function getUnitSpecies(unit: UnitEntity): UnitSpecies {
-  switch (unit.unitType) {
-    case "shrewScout":
-      return "shrew";
-    case "otterSkirmisher":
-      return "otter";
-    case "hareRunner":
-      return "hare";
-    case "badgerChampion":
-      return "badger";
-    case "ramCart":
-      return "machine";
-    default:
-      return "mouse";
-  }
-}
-
 function getUnitPalette(unit: UnitEntity, world: WorldState): UnitPalette {
+  const species = getUnitSpecies(unit, world);
   const factionTheme = getFactionTheme(world, unit.playerId);
   const base = {
     fur: unit.playerId === "player" ? 0xf0d7aa : 0xc06d63,
@@ -220,29 +211,40 @@ function getUnitPalette(unit: UnitEntity, world: WorldState): UnitPalette {
     shadow: mixColor(factionTheme.main, 0x150f0b, 0.86),
   };
 
-  switch (unit.unitType) {
-    case "worker":
-      return { ...base, cloth: mixColor(base.cloth, 0x5c7254, 0.4) };
-    case "shrewScout":
-      return { ...base, fur: unit.playerId === "player" ? 0xc8b89d : 0xb87368, cloth: mixColor(base.cloth, 0x4f6c81, 0.45) };
-    case "militia":
-      return { ...base, fur: unit.playerId === "player" ? 0xd9c59f : 0xc97d6b, cloth: mixColor(base.cloth, 0x6a5139, 0.4) };
-    case "shieldbearer":
-      return { ...base, fur: unit.playerId === "player" ? 0xe1cfab : 0xca806e, cloth: mixColor(base.cloth, 0x6a4b34, 0.42) };
-    case "slinger":
-      return { ...base, fur: unit.playerId === "player" ? 0xe2d0ae : 0xc78673, cloth: mixColor(base.cloth, 0x4e6f57, 0.4) };
-    case "archer":
-      return { ...base, fur: unit.playerId === "player" ? 0xe0cba4 : 0xc97f6d, cloth: mixColor(base.cloth, 0x4f6a5e, 0.4) };
-    case "otterSkirmisher":
-      return { ...base, fur: unit.playerId === "player" ? 0x8f7253 : 0x8d5048, cloth: mixColor(base.cloth, 0x436f73, 0.42), accent: mixColor(base.accent, 0xe4cb8c, 0.35) };
-    case "hareRunner":
-      return { ...base, fur: unit.playerId === "player" ? 0xe9cf9f : 0xd2856d, cloth: mixColor(base.cloth, 0xa34a3c, 0.46) };
-    case "badgerChampion":
-      return { fur: 0xe8e3d7, cloth: mixColor(base.cloth, 0x7a4334, 0.44), accent: mixColor(base.accent, 0xf0d391, 0.4), metal: mixColor(base.metal, 0xa9aaaf, 0.3), shadow: 0x161212 };
-    case "ramCart":
-      return { fur: 0x8d6844, cloth: mixColor(base.cloth, 0x6a4a2b, 0.5), accent: mixColor(base.accent, 0xd7b36f, 0.26), metal: mixColor(base.metal, 0x77716c, 0.2), shadow: 0x18120f };
-    default:
-      return base;
+  const paletteBySpecies: Record<Exclude<UnitSpecies, "machine">, Partial<UnitPalette>> = {
+    mouse: { fur: unit.playerId === "player" ? 0xe0cba4 : 0xc97f6d },
+    shrew: { fur: unit.playerId === "player" ? 0xc8b89d : 0xb87368, cloth: mixColor(base.cloth, 0x4f6c81, 0.45) },
+    otter: { fur: unit.playerId === "player" ? 0x8f7253 : 0x8d5048, cloth: mixColor(base.cloth, 0x436f73, 0.42), accent: mixColor(base.accent, 0xe4cb8c, 0.35) },
+    hare: { fur: unit.playerId === "player" ? 0xe9cf9f : 0xd2856d, cloth: mixColor(base.cloth, 0xa34a3c, 0.46) },
+    badger: { fur: 0xe8e3d7, cloth: mixColor(base.cloth, 0x7a4334, 0.44), accent: mixColor(base.accent, 0xf0d391, 0.4), metal: mixColor(base.metal, 0xa9aaaf, 0.3), shadow: 0x161212 },
+  };
+
+  if (species === "machine") {
+    return { fur: 0x8d6844, cloth: mixColor(base.cloth, 0x6a4a2b, 0.5), accent: mixColor(base.accent, 0xd7b36f, 0.26), metal: mixColor(base.metal, 0x77716c, 0.2), shadow: 0x18120f };
+  }
+
+  const speciesPalette = paletteBySpecies[species];
+  const byUnitType: Partial<UnitPalette> = (() => {
+    switch (unit.unitType) {
+      case "worker":
+        return { cloth: mixColor(base.cloth, 0x5c7254, 0.4) };
+      case "militia":
+        return { cloth: mixColor(base.cloth, 0x6a5139, 0.4) };
+      case "shieldbearer":
+        return { cloth: mixColor(base.cloth, 0x6a4b34, 0.42) };
+      case "slinger":
+        return { cloth: mixColor(base.cloth, 0x4e6f57, 0.4) };
+      case "archer":
+        return { cloth: mixColor(base.cloth, 0x4f6a5e, 0.4) };
+      default:
+        return {};
+    }
+  })();
+
+  return {
+    ...base,
+    ...speciesPalette,
+    ...byUnitType,
   }
 }
 
@@ -545,6 +547,7 @@ export class RedwallScene extends Phaser.Scene {
 
   private drawTerrain(graphics: Phaser.GameObjects.Graphics, world: WorldState): void {
     const player = world.players.player;
+    const terrainPalette = getMapDefinition(world.map.preset).terrainPalette;
     for (let y = 0; y < world.map.height; y += 1) {
       for (let x = 0; x < world.map.width; x += 1) {
         const index = y * world.map.width + x;
@@ -553,17 +556,17 @@ export class RedwallScene extends Phaser.Scene {
         const explored = player.explored[index];
         const point = this.tileToScreen({ x, y });
         const fillColor = !explored
-          ? 0x08100f
+          ? terrainPalette.unexplored
           : tile.terrain === "moss"
-            ? visible ? 0x335a44 : 0x21362a
+            ? visible ? terrainPalette.mossVisible : terrainPalette.mossExplored
             : tile.terrain === "dirt"
-              ? visible ? 0x705336 : 0x4c3827
+              ? visible ? terrainPalette.dirtVisible : terrainPalette.dirtExplored
               : visible
-                ? 0x4e6f48
-                : 0x2d402b;
+                ? terrainPalette.grassVisible
+                : terrainPalette.grassExplored;
         const lineAlpha = this.settings.showGrid ? 0.72 : 0.14;
-        const shadowColor = tile.terrain === "dirt" ? 0x3a281d : 0x18231b;
-        const highlightColor = tile.terrain === "dirt" ? 0xa47b53 : 0x6e9d72;
+        const shadowColor = terrainPalette.shadow;
+        const highlightColor = terrainPalette.highlight;
         graphics.fillStyle(fillColor, 1);
         graphics.lineStyle(1, visible ? 0x182220 : 0x0d1412, lineAlpha);
         graphics.beginPath();
@@ -832,7 +835,8 @@ export class RedwallScene extends Phaser.Scene {
 
   private getHoverEntityLabel(entity: Entity): string {
     if (entity.kind === "unit") {
-      return `${entity.playerId === "player" ? "Friendly" : "Enemy"} ${UNIT_DEFINITIONS[entity.unitType].label}`;
+      const definition = getRenderedUnitDefinition(entity, this.session.getWorld());
+      return `${entity.playerId === "player" ? "Friendly" : "Enemy"} ${definition.label}`;
     }
     if (entity.kind === "building") {
       return `${entity.playerId === "player" ? "Friendly" : "Enemy"} ${BUILDING_DEFINITIONS[entity.buildingType].label}`;
@@ -903,7 +907,7 @@ export class RedwallScene extends Phaser.Scene {
     const point = entity.kind === "unit"
       ? this.tileToScreen(entity.position)
       : this.tileToScreen({ x: entity.tile.x + 0.5, y: entity.tile.y + 0.5 });
-    const radius = entity.kind === "unit" ? getUnitRenderSize(entity) * 1.6 + 10 : 22;
+    const radius = entity.kind === "unit" ? getUnitRenderSize(entity, this.session.getWorld()) * 1.6 + 10 : 22;
     graphics.fillStyle(color, 0.1);
     graphics.fillEllipse(point.x, point.y + 12, radius * 1.9, Math.max(14, radius * 0.95));
     graphics.lineStyle(3, color, alpha);
@@ -1226,13 +1230,13 @@ export class RedwallScene extends Phaser.Scene {
   private drawUnit(graphics: Phaser.GameObjects.Graphics, unit: UnitEntity, selected: boolean, world: WorldState, timeMs: number): void {
     const basePoint = this.tileToScreen(unit.position);
     const palette = getUnitPalette(unit, world);
-    const species = getUnitSpecies(unit);
+    const species = getUnitSpecies(unit, world);
     const pose = getUnitAnimationState(unit, timeMs, { reducedMotion: this.settings.reducedMotion });
     const point = {
       x: basePoint.x + pose.sway,
       y: basePoint.y + pose.bob,
     };
-    const size = getUnitRenderSize(unit);
+    const size = getUnitRenderSize(unit, world);
     const hitFlash = Math.max(0, (this.hitFlashes.get(unit.id) ?? 0) - timeMs);
     const flashAmount = hitFlash > 0 ? Math.min(1, hitFlash / 160) : 0;
     if (selected) {
@@ -1828,7 +1832,7 @@ export class RedwallScene extends Phaser.Scene {
       if (entity.kind !== "unit" || !predicate(entity) || !this.isEntityVisibleToPlayer(this.session.getWorld(), entity)) {
         continue;
       }
-      const size = getUnitRenderSize(entity);
+      const size = getUnitRenderSize(entity, this.session.getWorld());
       const point = this.tileToScreen(entity.position);
       const hitCenterX = point.x;
       const hitCenterY = point.y + 2;
@@ -1865,7 +1869,7 @@ export class RedwallScene extends Phaser.Scene {
     if (entity.kind !== "unit") {
       return undefined;
     }
-    const size = getUnitRenderSize(entity);
+    const size = getUnitRenderSize(entity, this.session.getWorld());
     const point = this.tileToScreen(entity.position);
     const hitCenterX = point.x;
     const hitCenterY = point.y + 2;

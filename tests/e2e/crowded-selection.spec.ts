@@ -56,6 +56,6 @@ test("clicking the visible front worker in a crowded cluster selects that worker
     return selectedIds[0] ?? null;
   }).toBe(crowdedWorker.id);
 
-  await expect(page.getByTestId("selection-name")).toHaveText("Worker");
+  await expect(page.getByTestId("selection-name")).toContainText("Worker");
   await expect(page.getByTestId("action-build-dormitory")).toBeVisible();
 });

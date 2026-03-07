@@ -47,7 +47,8 @@ test("clicking a worker on the battlefield opens the command palette", async ({ 
 
   await canvas.click({ position: workerPoint.point });
 
-  await expect(page.getByTestId("selection-name")).toHaveText("Worker");
+  await expect(page.getByTestId("selection-name")).toContainText("Worker");
+  await expect(page.getByTestId("selection-weapon")).toContainText("Mallet");
   await expect(page.getByTestId("action-mode-move")).toBeVisible();
   await expect(page.getByTestId("action-build-dormitory")).toBeVisible();
 
@@ -69,7 +70,7 @@ test("clicking a worker on the battlefield opens the command palette", async ({ 
         y: workerPoint.point.y + offset.y,
       },
     });
-    await expect(page.getByTestId("selection-name")).toHaveText("Worker");
+    await expect(page.getByTestId("selection-name")).toContainText("Worker");
   }
 
   const layout = await page.evaluate(() => {

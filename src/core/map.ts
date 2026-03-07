@@ -2,9 +2,27 @@ import { createRng } from "./random";
 import type { MapData, MapPreset, MapTile, ResourceType, TilePoint } from "./types";
 
 type ResourceCluster = { type: ResourceType; tiles: TilePoint[] };
+type TerrainPalette = {
+  unexplored: number;
+  grassVisible: number;
+  grassExplored: number;
+  mossVisible: number;
+  mossExplored: number;
+  dirtVisible: number;
+  dirtExplored: number;
+  shadow: number;
+  highlight: number;
+  minimapVisible: string;
+  minimapExplored: string;
+};
+
 type MapPresetDefinition = {
   id: MapPreset;
   label: string;
+  description: string;
+  terrainSummary: string;
+  resourceSummary: string;
+  strategicNote: string;
   width: number;
   height: number;
   playerSpawn: TilePoint;
@@ -12,15 +30,20 @@ type MapPresetDefinition = {
   resourceClusters: ResourceCluster[];
   terrainWeights: {
     moss: number;
-    dirt: number;
-  };
+      dirt: number;
+    };
   elevationRange: number;
+  terrainPalette: TerrainPalette;
 };
 
 export const MAP_DEFINITIONS: Record<MapPreset, MapPresetDefinition> = {
   mossflowerMeadows: {
     id: "mossflowerMeadows",
     label: "Mossflower Meadows",
+    description: "A broad open meadow with balanced lanes, mirrored gathers, and few hard choke points.",
+    terrainSummary: "Open grassy lanes with light moss pockets and modest travel friction.",
+    resourceSummary: "Balanced outer woodlines with safe early berries and side stone and iron.",
+    strategicNote: "Best for standard openings, early scouting, and clean front-to-back battles.",
     width: 24,
     height: 24,
     playerSpawn: { x: 4, y: 4 },
@@ -30,6 +53,19 @@ export const MAP_DEFINITIONS: Record<MapPreset, MapPresetDefinition> = {
       dirt: 0.15,
     },
     elevationRange: 2,
+    terrainPalette: {
+      unexplored: 0x08100f,
+      grassVisible: 0x4e6f48,
+      grassExplored: 0x2d402b,
+      mossVisible: 0x335a44,
+      mossExplored: 0x21362a,
+      dirtVisible: 0x705336,
+      dirtExplored: 0x4c3827,
+      shadow: 0x18231b,
+      highlight: 0x6e9d72,
+      minimapVisible: "#4c7750",
+      minimapExplored: "#23372c",
+    },
     resourceClusters: [
       {
         type: "food",
@@ -78,6 +114,10 @@ export const MAP_DEFINITIONS: Record<MapPreset, MapPresetDefinition> = {
   abbeyOrchard: {
     id: "abbeyOrchard",
     label: "Abbey Orchard",
+    description: "An orchard battlefield with richer central food, greener cover, and longer lateral routes.",
+    terrainSummary: "Dense mossy greens and orchard soil with safe flanks and a food-rich center.",
+    resourceSummary: "Extra central food encourages mid-map control while timber stays nearer the edges.",
+    strategicNote: "Rewards factions that can rotate quickly and contest the center before the economy snowballs.",
     width: 28,
     height: 22,
     playerSpawn: { x: 5, y: 8 },
@@ -87,6 +127,19 @@ export const MAP_DEFINITIONS: Record<MapPreset, MapPresetDefinition> = {
       dirt: 0.1,
     },
     elevationRange: 2,
+    terrainPalette: {
+      unexplored: 0x08110d,
+      grassVisible: 0x567b4a,
+      grassExplored: 0x31492e,
+      mossVisible: 0x44704a,
+      mossExplored: 0x294233,
+      dirtVisible: 0x7b5b37,
+      dirtExplored: 0x503a27,
+      shadow: 0x1c2a1b,
+      highlight: 0x86ad6b,
+      minimapVisible: "#5b8450",
+      minimapExplored: "#2f4732",
+    },
     resourceClusters: [
       {
         type: "food",
@@ -139,6 +192,10 @@ export const MAP_DEFINITIONS: Record<MapPreset, MapPresetDefinition> = {
   salamandastronRidge: {
     id: "salamandastronRidge",
     label: "Salamandastron Ridge",
+    description: "A harsh ridge map with stone-heavy center ground, longer climbs, and tighter attack lanes.",
+    terrainSummary: "Rocky dirt lanes, sparse moss, and harsher elevation around the central ridge line.",
+    resourceSummary: "More central stone and exposed iron encourage positional play and fortified pushes.",
+    strategicNote: "Rewards tougher armies, deliberate timing windows, and control of narrow ridge approaches.",
     width: 26,
     height: 26,
     playerSpawn: { x: 5, y: 19 },
@@ -148,6 +205,19 @@ export const MAP_DEFINITIONS: Record<MapPreset, MapPresetDefinition> = {
       dirt: 0.26,
     },
     elevationRange: 3,
+    terrainPalette: {
+      unexplored: 0x0c0d0e,
+      grassVisible: 0x536649,
+      grassExplored: 0x313d2c,
+      mossVisible: 0x3c5443,
+      mossExplored: 0x27352c,
+      dirtVisible: 0x7e5a3d,
+      dirtExplored: 0x57402c,
+      shadow: 0x271b17,
+      highlight: 0xa7845d,
+      minimapVisible: "#6e5b43",
+      minimapExplored: "#3d3025",
+    },
     resourceClusters: [
       {
         type: "food",
