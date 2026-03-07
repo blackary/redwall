@@ -149,3 +149,9 @@
 - Tests run: `npm test`; `npm run test:e2e`; `npm run build`
 - Known gaps: Selection status is now much clearer, but later UX work can still add richer group-order summaries, portrait art, and deeper formation-level feedback for larger armies.
 - Commit hash: `3ec289b`
+
+## 2026-03-07 Group Order Summary HUD Pass
+- Summary: Expanded multi-unit selection feedback with worker/troop counts, a primary-order summary, live order breakdown chips, and sidebar group-order detail so large selections say what they are doing instead of only how many units are selected; also added browser coverage for grouped worker tasking.
+- Tests run: `npm test`; `npm run test:e2e`; `npm run build`
+- Known gaps: Group readability is stronger now, but later passes can still add formation previews, per-unit portrait art, and deeper military-control affordances like stance toggles or queueable mixed orders.
+- Commit hash: `201ca86`
