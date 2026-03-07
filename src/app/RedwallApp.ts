@@ -162,7 +162,12 @@ export class RedwallApp {
     this.renderMenu();
   }
 
+  private setDocumentMode(mode: AppMode): void {
+    document.body.dataset.appMode = mode;
+  }
+
   private renderMenu(): void {
+    this.setDocumentMode("menu");
     const unlockedSummary = getUnlockedSummary(this.profile);
     const nextUnlockHint = getNextUnlockHint(this.profile);
     const playableMaps = getPlayableMaps();
@@ -340,6 +345,7 @@ export class RedwallApp {
   private async startMatch(scenario: ScenarioId, existingWorld?: WorldState, resumeMeta?: ResumeMetadata): Promise<void> {
     this.destroyGame();
     this.mode = "skirmish";
+    this.setDocumentMode("skirmish");
     this.matchRewardApplied = false;
     this.root.innerHTML = `
       <div class="game-shell">
