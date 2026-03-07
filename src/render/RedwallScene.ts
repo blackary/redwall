@@ -224,6 +224,7 @@ export class RedwallScene extends Phaser.Scene {
 
     this.input.on("pointerdown", (pointer: Phaser.Input.Pointer) => {
       const domEvent = pointer.event as MouseEvent | undefined;
+      const worldPoint = this.getPointerWorldPoint(pointer);
       if (pointer.button === 1 || Boolean(domEvent?.shiftKey)) {
         this.isPanning = true;
         this.lastPanPoint = { x: pointer.x, y: pointer.y };
@@ -235,8 +236,8 @@ export class RedwallScene extends Phaser.Scene {
       this.dragStart = {
         screenX: pointer.x,
         screenY: pointer.y,
-        worldX: pointer.worldX,
-        worldY: pointer.worldY,
+        worldX: worldPoint.x,
+        worldY: worldPoint.y,
       };
       this.dragCurrent = this.dragStart;
     });
@@ -253,16 +254,18 @@ export class RedwallScene extends Phaser.Scene {
       if (!this.dragStart) {
         return;
       }
+      const worldPoint = this.getPointerWorldPoint(pointer);
       this.dragCurrent = {
         screenX: pointer.x,
         screenY: pointer.y,
-        worldX: pointer.worldX,
-        worldY: pointer.worldY,
+        worldX: worldPoint.x,
+        worldY: worldPoint.y,
       };
     });
 
     this.input.on("pointerup", (pointer: Phaser.Input.Pointer) => {
       const domEvent = pointer.event as MouseEvent | undefined;
+      const worldPoint = this.getPointerWorldPoint(pointer);
       if (this.isPanning) {
         this.isPanning = false;
         this.lastPanPoint = undefined;
@@ -270,7 +273,7 @@ export class RedwallScene extends Phaser.Scene {
         return;
       }
       if (this.isSecondaryCommand(pointer)) {
-        this.handleContextCommand(pointer.worldX, pointer.worldY);
+        this.handleContextCommand(worldPoint.x, worldPoint.y);
         this.clearDragSelection();
         return;
       }
@@ -280,8 +283,8 @@ export class RedwallScene extends Phaser.Scene {
       const endPoint = {
         screenX: pointer.x,
         screenY: pointer.y,
-        worldX: pointer.worldX,
-        worldY: pointer.worldY,
+        worldX: worldPoint.x,
+        worldY: worldPoint.y,
       };
       const end = this.screenToTile(endPoint.worldX, endPoint.worldY);
       const sessionState = this.session.getSessionState();
@@ -299,7 +302,7 @@ export class RedwallScene extends Phaser.Scene {
         );
         this.lastSelectionClick = undefined;
       } else {
-        this.handleSelection(pointer.worldX, pointer.worldY, end, {
+        this.handleSelection(worldPoint.x, worldPoint.y, end, {
           append: Boolean(domEvent?.metaKey),
           selectAllType: (domEvent?.detail ?? 0) >= 2,
         });
@@ -318,14 +321,7 @@ export class RedwallScene extends Phaser.Scene {
   }
 
   public getScreenPointForTile(tile: TilePoint): TilePoint {
-    const world = this.tileToScreen({ x: tile.x + 0.5, y: tile.y + 0.5 });
-    const camera = this.cameras.main;
-    const scaleX = this.scale.displaySize.width / this.scale.gameSize.width;
-    const scaleY = this.scale.displaySize.height / this.scale.gameSize.height;
-    return {
-      x: (world.x - camera.scrollX) * camera.zoom * scaleX,
-      y: (world.y - camera.scrollY) * camera.zoom * scaleY,
-    };
+    return this.worldToScreenPoint(this.tileToScreen({ x: tile.x + 0.5, y: tile.y + 0.5 }));
   }
 
   public getScreenPointForEntity(entityId: string): TilePoint | undefined {
@@ -333,12 +329,15 @@ export class RedwallScene extends Phaser.Scene {
     if (!entity) {
       return undefined;
     }
-    const tile = entity.kind === "unit"
-      ? { x: entity.position.x, y: entity.position.y }
+    const world = entity.kind === "unit"
+      ? this.tileToScreen(entity.position)
       : entity.kind === "building"
-        ? { x: entity.tile.x + 0.5, y: entity.tile.y + 0.5 }
-        : { x: entity.tile.x + 0.5, y: entity.tile.y + 0.5 };
-    return this.getScreenPointForTile(tile);
+        ? this.tileToScreen({
+            x: entity.tile.x + BUILDING_DEFINITIONS[entity.buildingType].footprint.x / 2,
+            y: entity.tile.y + BUILDING_DEFINITIONS[entity.buildingType].footprint.y / 2,
+          })
+        : this.tileToScreen({ x: entity.tile.x + 0.5, y: entity.tile.y + 0.5 });
+    return this.worldToScreenPoint(world);
   }
 
   public getAnimationState(entityId: string): UnitAnimationState | undefined {
@@ -550,7 +549,8 @@ export class RedwallScene extends Phaser.Scene {
     }
 
     if (buildMode && this.input.activePointer) {
-      const tile = this.screenToTile(this.input.activePointer.worldX, this.input.activePointer.worldY);
+      const worldPoint = this.getPointerWorldPoint(this.input.activePointer);
+      const tile = this.screenToTile(worldPoint.x, worldPoint.y);
       const definition = BUILDING_DEFINITIONS[buildMode];
       const top = this.tileToScreen(tile);
       const width = definition.footprint.x * (this.tileWidth / 2);
@@ -560,7 +560,8 @@ export class RedwallScene extends Phaser.Scene {
     }
 
     if (!buildMode && commandMode && this.input.activePointer) {
-      const tile = this.screenToTile(this.input.activePointer.worldX, this.input.activePointer.worldY);
+      const worldPoint = this.getPointerWorldPoint(this.input.activePointer);
+      const tile = this.screenToTile(worldPoint.x, worldPoint.y);
       const point = this.tileToScreen({ x: tile.x + 0.5, y: tile.y + 0.5 });
       const color = commandMode === "attack" ? 0xd16a6a : commandMode === "gather" ? 0x8fb66a : 0x8fbac3;
       graphics.lineStyle(2, color, 0.9);
@@ -1322,7 +1323,8 @@ export class RedwallScene extends Phaser.Scene {
     const selected = this.session.getSelectedEntities();
     const unitIds = selected.filter((entity) => entity.kind === "unit").map((entity) => entity.id);
     const pointer = this.input.activePointer;
-    const target = this.findTargetAtPoint(pointer.worldX, pointer.worldY, tile);
+    const worldPoint = this.getPointerWorldPoint(pointer);
+    const target = this.findTargetAtPoint(worldPoint.x, worldPoint.y, tile);
 
     if (sessionState.buildMode && unitIds.length > 0) {
       this.session.issueCommand({
@@ -1602,6 +1604,20 @@ export class RedwallScene extends Phaser.Scene {
     return {
       x: point.x / scaleX / camera.zoom + camera.scrollX,
       y: point.y / scaleY / camera.zoom + camera.scrollY,
+    };
+  }
+
+  private getPointerWorldPoint(pointer: Phaser.Input.Pointer): TilePoint {
+    return this.screenToWorld({ x: pointer.x, y: pointer.y });
+  }
+
+  private worldToScreenPoint(world: TilePoint): TilePoint {
+    const camera = this.cameras.main;
+    const scaleX = this.scale.displaySize.width / this.scale.gameSize.width;
+    const scaleY = this.scale.displaySize.height / this.scale.gameSize.height;
+    return {
+      x: (world.x - camera.scrollX) * camera.zoom * scaleX,
+      y: (world.y - camera.scrollY) * camera.zoom * scaleY,
     };
   }
 
