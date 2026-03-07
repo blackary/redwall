@@ -161,3 +161,9 @@
 - Tests run: `npm test`; `npm run test:e2e`; `npm run build`
 - Known gaps: Menu scrolling now works again, but later menu polish can still improve how much content is above the fold on shorter laptop screens.
 - Commit hash: `2fb6398`
+
+## 2026-03-07 Crowded Unit Click Priority Fix
+- Summary: Fixed crowded unit selection so overlapping friendly creatures no longer let a back-rank unit steal hover and click focus from the visible front unit, added a Playwright regression that clicks the visible torso of a crowded worker to prove the bug, and stabilized three browser regressions uncovered during the full validation pass by tightening session startup waits and pausing the sim before harvest-animation and resume-state assertions.
+- Tests run: `npm test`; `npm run test:e2e`; `npm run build`
+- Known gaps: Dense unit clicks now prefer the frontmost visible creature much more reliably, but a later polish pass can still add sprite-aware pick masks and formation-level selection affordances for even tighter battlefield control.
+- Commit hash: `6940a13`
