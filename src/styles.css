@@ -607,7 +607,7 @@ select {
 }
 
 .minimap-panel {
-  grid-template-rows: auto auto auto minmax(0, 1fr);
+  grid-template-rows: auto auto minmax(0, 1fr);
 }
 
 .selection-panel {
@@ -634,6 +634,16 @@ select {
 
 .minimap-panel .dock-kicker {
   font-weight: 700;
+}
+
+.minimap-copy {
+  display: grid;
+  gap: 10px;
+  align-content: start;
+  min-height: 0;
+  overflow: auto;
+  padding-right: 4px;
+  scrollbar-gutter: stable;
 }
 
 .panel-heading {
@@ -796,6 +806,11 @@ select {
 .hint,
 .minimap-instructions {
   color: #c7bc9f;
+}
+
+.hint,
+.minimap-instructions {
+  line-height: 1.4;
 }
 
 .minimap-panel canvas {

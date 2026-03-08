@@ -76,26 +76,46 @@ test("clicking a worker on the battlefield opens the command palette", async ({ 
   const layout = await page.evaluate(() => {
     const actionPanel = document.querySelector(".action-panel")?.getBoundingClientRect();
     const actionPalette = document.querySelector("[data-testid='action-panel']") as HTMLDivElement | null;
+    const buildButton = document.querySelector("[data-testid='action-build-dormitory']")?.getBoundingClientRect();
+    const queuePanel = document.querySelector("[data-testid='queue-panel']") as HTMLDivElement | null;
     const sidebar = document.querySelector("[data-testid='hud-sidebar']")?.getBoundingClientRect();
     const dock = document.querySelector(".hud-dock")?.getBoundingClientRect();
+    const textBlocks = [
+      document.querySelector("[data-testid='map-summary']")?.getBoundingClientRect(),
+      document.querySelector("[data-testid='faction-doctrine']")?.getBoundingClientRect(),
+      document.querySelector(".minimap-instructions")?.getBoundingClientRect(),
+      document.querySelector("[data-testid='outcome-label']")?.getBoundingClientRect(),
+    ]
+      .filter((rect): rect is DOMRect => Boolean(rect))
+      .map((rect) => ({ top: rect.top, bottom: rect.bottom }));
     return {
       viewportHeight: window.innerHeight,
       actionPanel: actionPanel ? { top: actionPanel.top, bottom: actionPanel.bottom } : null,
+      buildButton: buildButton ? { top: buildButton.top, bottom: buildButton.bottom } : null,
+      queueHidden: queuePanel?.hidden ?? null,
       sidebar: sidebar ? { top: sidebar.top, bottom: sidebar.bottom } : null,
       dock: dock ? { top: dock.top, bottom: dock.bottom, height: dock.height } : null,
       actionPaletteMetrics: actionPalette ? {
         clientHeight: actionPalette.clientHeight,
         scrollHeight: actionPalette.scrollHeight,
       } : null,
+      textBlocks,
     };
   });
 
   expect(layout.actionPanel).toBeTruthy();
+  expect(layout.buildButton).toBeTruthy();
   expect(layout.sidebar).toBeTruthy();
   expect(layout.dock).toBeTruthy();
   expect(layout.actionPaletteMetrics).toBeTruthy();
+  expect(layout.queueHidden).toBe(true);
   expect(layout.actionPanel!.bottom).toBeLessThanOrEqual(layout.viewportHeight);
+  expect(layout.buildButton!.top).toBeGreaterThanOrEqual(layout.actionPanel!.top);
+  expect(layout.buildButton!.bottom).toBeLessThanOrEqual(layout.actionPanel!.bottom);
   expect(layout.sidebar!.bottom).toBeLessThanOrEqual(layout.viewportHeight);
   expect(layout.dock!.height).toBeLessThanOrEqual(380);
   expect(layout.actionPaletteMetrics!.scrollHeight).toBeGreaterThanOrEqual(layout.actionPaletteMetrics!.clientHeight);
+  for (let index = 1; index < layout.textBlocks.length; index += 1) {
+    expect(layout.textBlocks[index]!.top).toBeGreaterThanOrEqual(layout.textBlocks[index - 1]!.bottom - 1);
+  }
 });

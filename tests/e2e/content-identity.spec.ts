@@ -29,7 +29,7 @@ test("menu and battlefield surface distinct map, doctrine, character, and weapon
 
   await expect(page.getByTestId("map-label")).toHaveText("Salamandastron Ridge");
   await expect(page.getByTestId("map-summary")).toContainText("Rocky dirt lanes");
-  await expect(page.getByTestId("faction-doctrine")).toContainText("Stone-rich mountain clans");
+  await expect(page.getByTestId("faction-doctrine")).toContainText("Infantry are sturdier and hit harder");
 
   const setup = await page.evaluate(() => {
     const snapshot = window.__REDWALL_DEBUG__?.getSnapshot();

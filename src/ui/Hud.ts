@@ -338,10 +338,12 @@ export class Hud {
             <span class="dock-kicker" data-testid="faction-label">Abbey Alliance</span>
           </div>
           <canvas data-testid="minimap" width="180" height="180"></canvas>
-          <p class="hint" data-testid="map-summary">Open grassy lanes with balanced resource lines.</p>
-          <p class="hint" data-testid="faction-doctrine">Balanced woodland defenders with steady growth.</p>
-          <p class="minimap-instructions">Left click the minimap to shift the camera. Double-click units to grab the full group.</p>
-          <p class="hint" data-testid="outcome-label">Hold the field. Destroy the enemy host.</p>
+          <div class="minimap-copy">
+            <p class="hint" data-testid="map-summary">Open grassy lanes with balanced resource lines.</p>
+            <p class="hint" data-testid="faction-doctrine">Balanced economy and steady population growth.</p>
+            <p class="minimap-instructions">Click the minimap to shift the camera. Double-click units to grab the full group.</p>
+            <p class="hint" data-testid="outcome-label">Hold the field. Destroy the enemy host.</p>
+          </div>
         </div>
         <div class="panel dock-panel selection-panel">
           <div class="dock-header">
@@ -457,8 +459,8 @@ export class Hud {
     const mapDefinition = getMapDefinition(world.map.preset);
     this.factionLabel.textContent = world.scenario === "tutorial" ? `${faction.label} Tutorial` : faction.label;
     this.factionLabel.style.color = toCssHex(getFactionPalette(player.faction, "player").main);
-    this.mapSummaryLabel.textContent = `${mapDefinition.terrainSummary} ${mapDefinition.resourceSummary}`;
-    this.factionDoctrineLabel.textContent = faction.doctrine;
+    this.mapSummaryLabel.textContent = mapDefinition.terrainSummary;
+    this.factionDoctrineLabel.textContent = faction.shortBonus;
     this.outcomeLabel.textContent =
       world.scenario === "tutorial"
         ? tutorialState?.completed
@@ -656,7 +658,11 @@ export class Hud {
       groups.get(group)?.push(action);
     }
 
-    for (const [groupLabel, groupActions] of groups) {
+    const sortedGroups = [...groups.entries()].sort((left, right) => {
+      return this.getPaletteGroupPriority(left[0]) - this.getPaletteGroupPriority(right[0]);
+    });
+
+    for (const [groupLabel, groupActions] of sortedGroups) {
       const section = document.createElement("section");
       section.className = "palette-section";
       section.dataset.testid = `palette-${groupLabel.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
@@ -675,6 +681,25 @@ export class Hud {
       this.actionsHost.append(section);
     }
     this.lastActionSignature = signature;
+  }
+
+  private getPaletteGroupPriority(groupLabel: string): number {
+    switch (groupLabel) {
+      case "Construction":
+        return 0;
+      case "Training":
+        return 1;
+      case "Research":
+        return 2;
+      case "Age Advancement":
+        return 3;
+      case "Tasking":
+        return 4;
+      case "Orders":
+        return 5;
+      default:
+        return 6;
+    }
   }
 
   private getActionSignature(
@@ -1172,17 +1197,20 @@ export class Hud {
     this.queueHost.innerHTML = "";
 
     if (selected.length !== 1 || selected[0].kind !== "building") {
-      this.queueSummaryHost.textContent = selected.length > 1 ? `${selected.length} units in the group` : "Select a production building";
-      const note = document.createElement("div");
-      note.className = "queue-entry";
-      note.innerHTML = `
-        <div class="queue-entry-title">Command Tips</div>
-        <div class="queue-entry-meta">Double-click troops for same-type selection. Click the minimap to snap the camera. Use QWER / ASDF / ZXCV on the Command Palette.</div>
-      `;
-      this.queueHost.append(note);
+      const selectedUnit = selected.length === 1 && selected[0].kind === "unit" ? selected[0] : undefined;
+      const workerSelected = Boolean(selectedUnit && UNIT_DEFINITIONS[selectedUnit.unitType].tags.includes("worker"));
+      this.queueHost.hidden = true;
+      this.queueSummaryHost.textContent = workerSelected
+        ? "Build and task controls"
+        : selected.length > 1
+          ? `${selected.length} units in the group`
+          : selectedUnit
+            ? "Unit commands"
+            : "Select a production building";
       return;
     }
 
+    this.queueHost.hidden = false;
     const building = selected[0];
     this.queueSummaryHost.textContent = building.completed
       ? (building.queue.length > 0 ? `${building.queue.length} queued` : "Idle")
