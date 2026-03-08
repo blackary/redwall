@@ -185,3 +185,9 @@
 - Tests run: `npm test`; `npm run test:e2e`; `npm run build`
 - Known gaps: Visible clicks now land on the rendered creatures instead of several tiles northwest, but later control polish can still add tighter sprite-aware pick masks and stronger multi-unit hover silhouettes in dense late-game clumps.
 - Commit hash: `f74b1c8`
+
+## 2026-03-07 Worker Build Palette and HUD Readability Fix
+- Summary: Reworked the worker command palette so `Construction` cards render ahead of generic orders, hid the queue/tips block whenever a unit is selected so build buttons stay above the fold, moved the minimap copy into its own scroll-safe text column, shortened the left-panel battlefield copy, and extended the Playwright layout regression to prove the worker build button is visibly inside the palette while the minimap text blocks do not overlap.
+- Tests run: `npm test`; `npm run test:e2e`; `npm run build`
+- Known gaps: Worker build controls are now directly visible and the lower HUD copy no longer collides, but the next UI polish pass should still refine typography density on smaller laptop heights and consider richer command grouping for advanced building chains.
+- Commit hash: `6b1aec9`
